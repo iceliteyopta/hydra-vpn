@@ -15,6 +15,12 @@ namespace Hydra
         static int Main(string[] args)
         {
             if (args.Length >= 2 && args[0] == "--selftest") return SelfTest.Run(args[1]);
+            if (args.Length >= 2 && args[0] == "--fetch-core")
+            {
+                // Скачать ядро sing-box в cores\ рядом с exe; результат — в файл args[1]
+                try { File.WriteAllText(args[1], "OK " + CoreDownloader.Download(null)); return 0; }
+                catch (Exception ex) { File.WriteAllText(args[1], "FAIL " + ex.Message); return 1; }
+            }
             if (args.Length >= 2 && args[0] == "--screenshots")
             {
                 // Снимки страниц окна в PNG (без запуска VPN): --screenshots <папка> [ru|en]

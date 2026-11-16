@@ -32,6 +32,13 @@ namespace Hydra
         FlowLayoutPanel homeChips;
         Card killBanner;
         Label killBannerText;
+        // загрузка ядра sing-box
+        Card coreBanner;
+        Label coreText;
+        PaintControl coreBar;
+        FlatButton coreRetry, coreManual;
+        int corePct = -1;
+        bool coreBusy;
         // туннели
         FlowLayoutPanel tunnelList;
         Label tunnelsEmpty;
@@ -102,8 +109,58 @@ namespace Hydra
             HandleCreated += (s, e) => Theme.DarkTitleBar(this);
             Shown += (s, e) => engine.SyncKillState();
 
-            if (AppPaths.SingBox(P) == null)
-                AppendLog(I18n.L("sing-box.exe не найден: положите его в ") + AppPaths.CoresDir + I18n.L(" (см. README.md)"));
+            // Нет ядра — скачиваем сами сразу после открытия окна
+            Shown += (s, e) => { if (AppPaths.SingBox(P) == null) StartCoreDownload(); };
+        }
+
+        void LayoutCoreBanner()
+        {
+            int w = coreBanner.Width;
+            coreBar.Width = w - 36;
+            coreRetry.Location = new Point(w - coreRetry.Width - 14, 14);
+            coreManual.Location = new Point(coreRetry.Left - coreManual.Width - 8, 14);
+            int textW = coreRetry.Visible ? coreManual.Left - 30 : w - 36;
+            coreText.MaximumSize = new Size(Math.Max(200, textW), 0);
+        }
+
+        void StartCoreDownload()
+        {
+            if (coreBusy) return;
+            coreBusy = true; corePct = 0;
+            coreText.Text = I18n.L("Скачиваю ядро sing-box ") + CoreDownloader.Version + I18n.L(" с GitHub… Это нужно один раз.");
+            coreText.ForeColor = Theme.Text;
+            coreRetry.Visible = false; coreManual.Visible = false; coreBar.Visible = true;
+            coreBanner.Visible = true;
+            RefreshHome();
+            AppendLog(I18n.L("Ядро sing-box не найдено — скачиваю ") + CoreDownloader.Url);
+            var th = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    string path = CoreDownloader.Download((pct, bytes) => Ui(() => { corePct = pct; coreBar.Invalidate(); }));
+                    Ui(() =>
+                    {
+                        coreBusy = false;
+                        coreBanner.Visible = false;
+                        AppendLog(I18n.L("Ядро sing-box установлено: ") + path);
+                        RefreshHome();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Ui(() =>
+                    {
+                        coreBusy = false;
+                        coreText.Text = I18n.L("Не удалось скачать sing-box: ") + ex.Message;
+                        coreText.ForeColor = Theme.Warn;
+                        coreBar.Visible = false; coreRetry.Visible = true; coreManual.Visible = true;
+                        AppendLog(I18n.L("Не удалось скачать sing-box: ") + ex.Message);
+                        LayoutHome(power.Parent);
+                    });
+                }
+            });
+            th.IsBackground = true;
+            th.Start();
         }
 
         void Ui(Action a)
@@ -155,7 +212,7 @@ namespace Hydra
                 using (var br = new SolidBrush(sideDotColor)) e.Graphics.FillEllipse(br, 3.5f, 3.5f, 6, 6);
             };
             sideStatus = new Label { AutoSize = true, Location = new Point(24, 12), ForeColor = Theme.Text, Font = Theme.UiSemi(9.5f), BackColor = Theme.Sidebar };
-            var ver = new Label { AutoSize = true, Location = new Point(24, 34), ForeColor = Theme.Muted, Font = Theme.Ui(8f), Text = "Hydra 2.0 · sing-box", BackColor = Theme.Sidebar };
+            var ver = new Label { AutoSize = true, Location = new Point(24, 34), ForeColor = Theme.Muted, Font = Theme.Ui(8f), Text = "Hydra 2.1 · sing-box", BackColor = Theme.Sidebar };
             bottom.Controls.Add(sideDot); bottom.Controls.Add(sideStatus); bottom.Controls.Add(ver);
 
             sidebar.Controls.Add(nav);
@@ -253,6 +310,27 @@ namespace Hydra
             lblSub = new Label { AutoSize = true, Font = Theme.Ui(10f), ForeColor = Theme.Muted, BackColor = Theme.Bg };
             homeChips = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Bg, MaximumSize = new Size(760, 0) };
 
+            coreBanner = new Card { Height = 64, Fill = Theme.Mix(Theme.Surface, Theme.Accent, 0.08f), Visible = false };
+            coreText = new Label { AutoSize = true, ForeColor = Theme.Text, Font = Theme.UiSemi(9.5f), Location = new Point(18, 12), BackColor = Color.Transparent };
+            coreBar = new PaintControl { Height = 6, Location = new Point(18, 40) };
+            coreBar.Paint += (s, e) =>
+            {
+                var g = e.Graphics; Theme.Hq(g);
+                var r = new RectangleF(0, 0, coreBar.Width - 1, coreBar.Height - 1);
+                using (var path = Theme.Round(r, 3)) using (var br = new SolidBrush(Theme.Surface2)) g.FillPath(br, path);
+                float pct = corePct < 0 ? 30 : corePct;
+                var fr = new RectangleF(0, 0, Math.Max(6, r.Width * pct / 100f), r.Height);
+                using (var path = Theme.Round(fr, 3)) using (var br = new LinearGradientBrush(new RectangleF(0, 0, coreBar.Width, 6), Theme.Accent, Theme.Accent2, LinearGradientMode.Horizontal)) g.FillPath(br, path);
+            };
+            coreRetry = new FlatButton(I18n.L("Повторить"), Theme.IcDown, ButtonKind.Primary) { Visible = false };
+            coreRetry.Click += (s, e) => StartCoreDownload();
+            coreManual = new FlatButton(I18n.L("Скачать вручную"), Theme.IcLink, ButtonKind.Secondary) { Visible = false };
+            coreManual.Click += (s, e) => { try { Process.Start(CoreDownloader.ReleasesPage); } catch { } };
+            coreBanner.Controls.Add(coreText); coreBanner.Controls.Add(coreBar); coreBanner.Controls.Add(coreRetry); coreBanner.Controls.Add(coreManual);
+            coreBanner.Resize += (s, e) => LayoutCoreBanner();
+            coreRetry.VisibleChanged += (s, e) => LayoutCoreBanner();
+
+            body.Controls.Add(coreBanner);
             body.Controls.Add(killBanner);
             body.Controls.Add(power);
             body.Controls.Add(lblStatus);
@@ -269,8 +347,12 @@ namespace Hydra
         void LayoutHome(Control body)
         {
             int w = body.ClientSize.Width;
-            killBanner.Width = w; killBanner.Location = new Point(0, 0);
-            int top = killBanner.Visible ? 76 : 10;
+            int top = 0;
+            coreBanner.Width = w; coreBanner.Location = new Point(0, top);
+            if (coreBanner.Visible) top += coreBanner.Height + 12;
+            killBanner.Width = w; killBanner.Location = new Point(0, top);
+            if (killBanner.Visible) top += killBanner.Height + 16;
+            if (top == 0) top = 10;
             power.Location = new Point((w - power.Width) / 2, top);
             lblStatus.Location = new Point((w - lblStatus.Width) / 2, power.Bottom + 6);
             lblSub.Location = new Point((w - lblSub.Width) / 2, lblStatus.Bottom + 4);
@@ -1020,7 +1102,9 @@ namespace Hydra
             SaveRules();
             if (AppPaths.SingBox(P) == null)
             {
-                MessageBox.Show(this, I18n.L("Не найден sing-box.exe.\nПоложите его в папку:\n") + AppPaths.CoresDir, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                // Ядра ещё нет: показываем загрузку на главной
+                ShowPage("home");
+                if (!coreBusy) StartCoreDownload();
                 return;
             }
             statuses.Clear();

@@ -47,19 +47,20 @@
 
 ## Быстрый старт
 
-1. Скачайте или клонируйте репозиторий.
-2. Соберите (нужен `csc.exe` из .NET Framework 4.x, он уже есть в Windows 10/11):
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File build.ps1
-   ```
-3. Скачайте ядро sing-box (официальный релиз ляжет в `cores\`):
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File get-singbox.ps1
-   ```
-4. Запустите `Hydra.exe`. Программа попросит права администратора: они нужны для TUN и правил брандмауэра.
-5. **Туннели**: добавьте ссылки или импортируйте `.ovpn` / `.conf`. **Правила**: добавьте правила или шаблоны и выберите, куда идёт *весь остальной трафик*. Нажмите большую кнопку питания.
+1. Скачайте **`Hydra.exe`** со страницы [Releases](https://github.com/iceliteyopta/hydra-vpn/releases/latest) и запустите. Программа попросит права администратора: они нужны для TUN и правил брандмауэра.
+2. При первом запуске Hydra сама скачает официальное ядро sing-box в `cores\`. Архив проверяется по SHA-256, который публикует GitHub. Это происходит один раз.
+3. **Туннели**: добавьте ссылки или импортируйте `.ovpn` / `.conf`. **Правила**: добавьте правила или шаблоны и выберите, куда идёт *весь остальной трафик*. Нажмите большую кнопку питания.
+
+Требования: Windows 10/11 x64. .NET Framework 4.x уже есть в Windows. Exe не подписан, поэтому SmartScreen может попросить подтверждение («Подробнее → Выполнить в любом случае»).
 
 Для AmneziaWG положите `amneziawg-go.exe` и `wintun.dll` в `cores\amneziawg\`.
+
+### Сборка из исходников
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build.ps1      # компилятор csc.exe уже есть в Windows
+powershell -ExecutionPolicy Bypass -File get-singbox.ps1 # необязательно: скачать ядро без запуска Hydra
+```
 
 ## Файлы
 

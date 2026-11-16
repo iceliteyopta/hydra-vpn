@@ -11,7 +11,8 @@ $out = if ($Out) { $Out } else { Join-Path $root 'Hydra.exe' }
 & $csc /nologo /target:winexe /optimize+ /codepage:65001 /nowarn:1607 `
     "/out:$out" "/win32manifest:$(Join-Path $root 'src\app.manifest')" `
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
-    /r:System.Web.Extensions.dll /r:System.Security.dll $src
+    /r:System.Web.Extensions.dll /r:System.Security.dll `
+    /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll $src
 
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 New-Item -ItemType Directory -Force (Join-Path $root 'cores') | Out-Null

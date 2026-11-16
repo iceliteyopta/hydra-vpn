@@ -229,6 +229,16 @@ namespace Hydra
             T("PKCS#12 (pkcs12) не поддерживается встроенным OpenVPN — выберите драйвер dco/wintun/tap", "PKCS#12 (pkcs12) is not supported by the built-in OpenVPN — choose the dco/wintun/tap driver");
             T("PKCS#12 не поддерживается встроенным OpenVPN — выберите драйвер dco/wintun/tap", "PKCS#12 is not supported by the built-in OpenVPN — choose the dco/wintun/tap driver");
             T("в конфиге нет строки remote", "the config has no remote line");
+            // --- загрузка ядра ---
+            T("Скачиваю ядро sing-box ", "Downloading the sing-box core ");
+            T(" с GitHub… Это нужно один раз.", " from GitHub… This happens only once.");
+            T("Ядро sing-box не найдено — скачиваю ", "sing-box core not found — downloading ");
+            T("Ядро sing-box установлено: ", "sing-box core installed: ");
+            T("Не удалось скачать sing-box: ", "Could not download sing-box: ");
+            T("Повторить", "Retry");
+            T("Скачать вручную", "Download manually");
+            T("контрольная сумма архива не совпала — файл повреждён или подменён", "archive checksum mismatch — the file is corrupted or tampered with");
+            T("в архиве нет sing-box.exe", "sing-box.exe is missing from the archive");
             // --- Program ---
             T("Для работы VPN нужны права администратора.", "Hydra needs administrator rights to run the VPN.");
             T("Hydra уже запущена (иконка в трее).", "Hydra is already running (see the tray icon).");
