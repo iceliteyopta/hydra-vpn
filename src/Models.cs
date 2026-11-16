@@ -75,9 +75,14 @@ namespace Hydra
         public List<string> KillApps { get; set; }
         public string KillDomains { get; set; }
         public string KillTunnel { get; set; }
+        // Обновления с GitHub
+        public bool CheckUpdates { get; set; }
+        public string SkippedVersion { get; set; }
 
         public Profile()
         {
+            CheckUpdates = true;
+            SkippedVersion = "";
             KillApps = new List<string>(Hydra.KillSwitch.DefaultApps);
             KillDomains = Hydra.KillSwitch.DefaultDomains;
             KillTunnel = "";

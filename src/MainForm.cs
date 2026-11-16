@@ -39,6 +39,12 @@ namespace Hydra
         FlatButton coreRetry, coreManual;
         int corePct = -1;
         bool coreBusy;
+        // обновление Hydra
+        Card updBanner;
+        Label updText;
+        FlatButton updNow, updNotes, updLater;
+        Updater.Release pendingUpdate;
+        bool updBusy;
         // туннели
         FlowLayoutPanel tunnelList;
         Label tunnelsEmpty;
@@ -111,6 +117,97 @@ namespace Hydra
 
             // Нет ядра — скачиваем сами сразу после открытия окна
             Shown += (s, e) => { if (AppPaths.SingBox(P) == null) StartCoreDownload(); };
+            // Проверка обновлений на GitHub
+            Shown += (s, e) => { if (P.CheckUpdates) CheckForUpdates(false); };
+        }
+
+        // ======================= обновления =======================
+        void CheckForUpdates(bool manual)
+        {
+            var th = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    var r = Updater.CheckLatest();
+                    Ui(() =>
+                    {
+                        if (r == null)
+                        {
+                            if (manual) MessageBox.Show(this, I18n.L("У вас последняя версия Hydra ") + Updater.CurrentVersion + ".", AppName);
+                            return;
+                        }
+                        if (!manual && r.Version == P.SkippedVersion) return;
+                        pendingUpdate = r;
+                        updText.Text = I18n.L("Доступна новая версия Hydra ") + r.Version + I18n.L(" (у вас ") + Updater.CurrentVersion + ")";
+                        updText.ForeColor = Theme.Text;
+                        updNow.Text = I18n.L("Обновить"); updNow.Enabled = true;
+                        updBanner.Visible = true;
+                        AppendLog(I18n.L("Доступна новая версия Hydra ") + r.Version + ": " + r.HtmlUrl);
+                        RefreshHome();
+                        if (manual) ShowPage("home");
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Ui(() =>
+                    {
+                        AppendLog(I18n.L("Не удалось проверить обновления: ") + ex.Message);
+                        if (manual) MessageBox.Show(this, I18n.L("Не удалось проверить обновления: ") + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    });
+                }
+            });
+            th.IsBackground = true;
+            th.Start();
+        }
+
+        void InstallUpdate()
+        {
+            if (pendingUpdate == null || updBusy) return;
+            if (engine.State != "stopped" &&
+                MessageBox.Show(this, I18n.L("Для обновления VPN будет отключён, Hydra перезапустится. Продолжить?"), AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                return;
+            updBusy = true;
+            updNow.Enabled = false; updLater.Visible = false;
+            var r = pendingUpdate;
+            var th = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    string exe = Updater.DownloadAndReplace(r, pct => Ui(() => { updNow.Text = I18n.L("Скачиваю… ") + pct + "%"; updNow.AutoSizeToText(); LayoutUpdBanner(); }));
+                    Ui(() =>
+                    {
+                        AppendLog(I18n.L("Hydra обновлена до ") + r.Version + I18n.L(", перезапуск…"));
+                        if (engine.State != "stopped") engine.StopBlocking();
+                        tray.Visible = false;
+                        Updater.Restart(exe);
+                        Close();
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Ui(() =>
+                    {
+                        updBusy = false;
+                        updText.Text = I18n.L("Не удалось обновить Hydra: ") + ex.Message;
+                        updText.ForeColor = Theme.Warn;
+                        updNow.Text = I18n.L("Повторить"); updNow.Enabled = true; updNow.AutoSizeToText();
+                        LayoutUpdBanner();
+                    });
+                }
+            });
+            th.IsBackground = true;
+            th.Start();
+        }
+
+
+        void LayoutUpdBanner()
+        {
+            int w = updBanner.Width;
+            updNow.Location = new Point(w - updNow.Width - 14, 14);
+            updNotes.Location = new Point(updNow.Left - updNotes.Width - 8, 14);
+            updLater.Location = new Point(updNotes.Left - updLater.Width - 8, 14);
+            int left = updLater.Visible ? updLater.Left : updNotes.Left;
+            updText.MaximumSize = new Size(Math.Max(200, left - 30), 0);
         }
 
         void LayoutCoreBanner()
@@ -212,7 +309,7 @@ namespace Hydra
                 using (var br = new SolidBrush(sideDotColor)) e.Graphics.FillEllipse(br, 3.5f, 3.5f, 6, 6);
             };
             sideStatus = new Label { AutoSize = true, Location = new Point(24, 12), ForeColor = Theme.Text, Font = Theme.UiSemi(9.5f), BackColor = Theme.Sidebar };
-            var ver = new Label { AutoSize = true, Location = new Point(24, 34), ForeColor = Theme.Muted, Font = Theme.Ui(8f), Text = "Hydra 2.1 · sing-box", BackColor = Theme.Sidebar };
+            var ver = new Label { AutoSize = true, Location = new Point(24, 34), ForeColor = Theme.Muted, Font = Theme.Ui(8f), Text = "Hydra " + Updater.CurrentVersion + " · sing-box", BackColor = Theme.Sidebar };
             bottom.Controls.Add(sideDot); bottom.Controls.Add(sideStatus); bottom.Controls.Add(ver);
 
             sidebar.Controls.Add(nav);
@@ -330,6 +427,22 @@ namespace Hydra
             coreBanner.Resize += (s, e) => LayoutCoreBanner();
             coreRetry.VisibleChanged += (s, e) => LayoutCoreBanner();
 
+            updBanner = new Card { Height = 64, Fill = Theme.Mix(Theme.Surface, Theme.Accent2, 0.10f), Visible = false };
+            updText = new Label { AutoSize = true, ForeColor = Theme.Text, Font = Theme.UiSemi(9.5f), Location = new Point(18, 22), BackColor = Color.Transparent };
+            updNow = new FlatButton(I18n.L("Обновить"), Theme.IcDown, ButtonKind.Primary);
+            updNow.Click += (s, e) => InstallUpdate();
+            updNotes = new FlatButton(I18n.L("Что нового"), Theme.IcLink, ButtonKind.Secondary);
+            updNotes.Click += (s, e) => { try { if (pendingUpdate != null) Process.Start(pendingUpdate.HtmlUrl); } catch { } };
+            updLater = new FlatButton(I18n.L("Позже"), null, ButtonKind.Ghost);
+            updLater.Click += (s, e) =>
+            {
+                if (pendingUpdate != null) { P.SkippedVersion = pendingUpdate.Version; Save(); }
+                updBanner.Visible = false; RefreshHome();
+            };
+            updBanner.Controls.Add(updText); updBanner.Controls.Add(updNow); updBanner.Controls.Add(updNotes); updBanner.Controls.Add(updLater);
+            updBanner.Resize += (s, e) => LayoutUpdBanner();
+
+            body.Controls.Add(updBanner);
             body.Controls.Add(coreBanner);
             body.Controls.Add(killBanner);
             body.Controls.Add(power);
@@ -348,6 +461,8 @@ namespace Hydra
         {
             int w = body.ClientSize.Width;
             int top = 0;
+            updBanner.Width = w; updBanner.Location = new Point(0, top);
+            if (updBanner.Visible) top += updBanner.Height + 12;
             coreBanner.Width = w; coreBanner.Location = new Point(0, top);
             if (coreBanner.Visible) top += coreBanner.Height + 12;
             killBanner.Width = w; killBanner.Location = new Point(0, top);
@@ -782,6 +897,15 @@ namespace Hydra
             };
             AddRow(tl, I18n.L("Язык") + " / Language", cbLang, null);
 
+            var updRow = new FlowLayoutPanel { AutoSize = true, BackColor = Theme.Surface, WrapContents = false, Margin = new Padding(0) };
+            var tgUpd = new ToggleSwitch { Margin = new Padding(0, 4, 14, 0) };
+            tgUpd.SetSilently(P.CheckUpdates);
+            tgUpd.CheckedChanged += (s, e) => { P.CheckUpdates = tgUpd.Checked; Save(); };
+            var checkNow = new FlatButton(I18n.L("Проверить сейчас"), Theme.IcDown, ButtonKind.Secondary) { Margin = new Padding(0) };
+            checkNow.Click += (s, e) => CheckForUpdates(true);
+            updRow.Controls.Add(tgUpd); updRow.Controls.Add(checkNow);
+            AddRow(tl, I18n.L("Проверять обновления"), updRow, I18n.L("При запуске Hydra смотрит последний релиз на GitHub. Текущая версия: ") + Updater.CurrentVersion);
+
             var folder = new FlatButton(I18n.L("Открыть папку Hydra"), Theme.IcFolder, ButtonKind.Secondary);
             folder.Click += (s, e) => Process.Start("explorer.exe", "\"" + AppPaths.BaseDir + "\"");
             var preview = new FlatButton(I18n.L("Показать конфиг sing-box"), Theme.IcCode, ButtonKind.Secondary);
@@ -981,7 +1105,7 @@ namespace Hydra
             string dec;
             if (!text.Contains("://") && LinkParser.TryB64(text, out dec) && dec.Contains("://")) text = dec;
 
-            int ok = 0;
+            int ok = 0, before = P.Tunnels.Count;
             var errors = new List<string>();
             foreach (var raw in text.Split('\n'))
             {
@@ -995,6 +1119,7 @@ namespace Hydra
                 }
                 catch (Exception ex) { errors.Add(ex.Message); }
             }
+            if (ok > 0 && before == 0) AutoFinal(P.Tunnels[0]);
             Save(); LoadTunnels();
             if (errors.Count > 0)
                 MessageBox.Show(this, I18n.L("Добавлено: ") + ok + I18n.L("\nНе удалось разобрать: ") + errors.Count + "\n\n" + string.Join("\n", errors.ToArray()), AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -1018,6 +1143,7 @@ namespace Hydra
                         if (Dialogs.Credentials(this, I18n.L("Логин для ") + t.Name, ref user, out pass)) { t.OvpnUser = user; t.OvpnPassProtected = Secret.Protect(pass); }
                     }
                     P.Tunnels.Add(t);
+                    if (P.Tunnels.Count == 1) AutoFinal(t);
                     Save(); LoadTunnels();
                 }
                 catch (Exception ex) { MessageBox.Show(this, I18n.L("Не удалось импортировать: ") + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
@@ -1045,6 +1171,7 @@ namespace Hydra
                     Directory.CreateDirectory(t.Dir());
                     File.WriteAllText(t.ConfigPath(), text);
                     P.Tunnels.Add(t);
+                    if (P.Tunnels.Count == 1) AutoFinal(t);
                     Save(); LoadTunnels();
                 }
                 catch (Exception ex) { MessageBox.Show(this, I18n.L("Не удалось импортировать: ") + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
@@ -1107,8 +1234,41 @@ namespace Hydra
                 if (!coreBusy) StartCoreDownload();
                 return;
             }
+            // Защита от «включил — ничего не изменилось»: весь трафик напрямую и ни одно правило не ведёт в туннель
+            if (P.Final == "direct" && !AnyRuleUsesTunnel())
+            {
+                Tunnel first = null;
+                foreach (var t in P.Tunnels) if (t.Enabled) { first = t; break; }
+                if (first != null)
+                {
+                    var ans = MessageBox.Show(this,
+                        I18n.L("Сейчас весь трафик идёт напрямую, и ни одно правило не направляет его в туннель — VPN ничего не изменит.\n\nПустить весь трафик через «") + first.Name + I18n.L("»?\n\n(Это можно поменять на вкладке «Правила» → «Весь остальной трафик».)"),
+                        AppName, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                    if (ans == DialogResult.Cancel) return;
+                    if (ans == DialogResult.Yes) { P.Final = first.Name; Save(); RefreshTargets(); RefreshHome(); }
+                }
+            }
             statuses.Clear();
             engine.Start(P);
+        }
+
+        bool AnyRuleUsesTunnel()
+        {
+            foreach (var r in P.Rules)
+                if (r.Enabled && r.Target != "direct" && r.Target != "block")
+                {
+                    var t = P.Find(r.Target);
+                    if (t != null && t.Enabled) return true;
+                }
+            return false;
+        }
+
+        // Первый туннель сразу становится маршрутом для всего трафика — иначе VPN «ничего не делает»
+        void AutoFinal(Tunnel t)
+        {
+            if (P.Final != "direct" || P.Rules.Count > 0) return;
+            P.Final = t.Name;
+            AppendLog(I18n.L("Весь трафик теперь идёт через «") + t.Name + I18n.L("». Изменить: «Правила» → «Весь остальной трафик».") );
         }
 
         void OnState(string st)

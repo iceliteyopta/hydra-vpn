@@ -240,6 +240,30 @@ namespace Hydra
             T("Скачать вручную", "Download manually");
             T("контрольная сумма архива не совпала — файл повреждён или подменён", "archive checksum mismatch — the file is corrupted or tampered with");
             T("в архиве нет sing-box.exe", "sing-box.exe is missing from the archive");
+            // --- обновления ---
+            T("У вас последняя версия Hydra ", "You have the latest Hydra ");
+            T("Доступна новая версия Hydra ", "A new Hydra version is available: ");
+            T(" (у вас ", " (you have ");
+            T("Обновить", "Update");
+            T("Что нового", "What's new");
+            T("Позже", "Later");
+            T("Не удалось проверить обновления: ", "Could not check for updates: ");
+            T("Для обновления VPN будет отключён, Hydra перезапустится. Продолжить?", "VPN will be disconnected and Hydra will restart to update. Continue?");
+            T("Скачиваю… ", "Downloading… ");
+            T("Hydra обновлена до ", "Hydra updated to ");
+            T(", перезапуск…", ", restarting…");
+            T("Не удалось обновить Hydra: ", "Could not update Hydra: ");
+            T("Проверить сейчас", "Check now");
+            T("Проверять обновления", "Check for updates");
+            T("При запуске Hydra смотрит последний релиз на GitHub. Текущая версия: ", "On launch Hydra checks the latest GitHub release. Current version: ");
+            T("в релизе нет Hydra.exe", "the release has no Hydra.exe");
+            T("GitHub не сообщил контрольную сумму файла", "GitHub did not provide a checksum for the file");
+            T("контрольная сумма не совпала — обновление отменено", "checksum mismatch — update cancelled");
+            // --- маршрут по умолчанию ---
+            T("Сейчас весь трафик идёт напрямую, и ни одно правило не направляет его в туннель — VPN ничего не изменит.\n\nПустить весь трафик через «", "Right now all traffic goes direct and no rule sends anything into a tunnel — the VPN would change nothing.\n\nSend all traffic through “");
+            T("»?\n\n(Это можно поменять на вкладке «Правила» → «Весь остальной трафик».)", "”?\n\n(You can change this under Rules → All other traffic.)");
+            T("Весь трафик теперь идёт через «", "All traffic now goes through “");
+            T("». Изменить: «Правила» → «Весь остальной трафик».", "”. Change it under Rules → All other traffic.");
             // --- Program ---
             T("Для работы VPN нужны права администратора.", "Hydra needs administrator rights to run the VPN.");
             T("Hydra уже запущена (иконка в трее).", "Hydra is already running (see the tray icon).");

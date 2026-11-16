@@ -15,6 +15,19 @@ namespace Hydra
         static int Main(string[] args)
         {
             if (args.Length >= 2 && args[0] == "--selftest") return SelfTest.Run(args[1]);
+            if (args.Length >= 2 && args[0] == "--update-test")
+            {
+                // Проверка самообновления без окна: найти релиз новее, скачать, подменить exe
+                try
+                {
+                    var r = Updater.CheckLatest();
+                    if (r == null) { File.WriteAllText(args[1], "NO UPDATE (current " + Updater.CurrentVersion + ")"); return 0; }
+                    string exe = Updater.DownloadAndReplace(r, null);
+                    File.WriteAllText(args[1], "UPDATED to " + r.Version + " sha256=" + r.ExeSha256 + " -> " + exe);
+                    return 0;
+                }
+                catch (Exception ex) { File.WriteAllText(args[1], "FAIL " + ex.Message); return 1; }
+            }
             if (args.Length >= 2 && args[0] == "--fetch-core")
             {
                 // Скачать ядро sing-box в cores\ рядом с exe; результат — в файл args[1]
@@ -148,9 +161,17 @@ namespace Hydra
                 return 0;
             }
 
+            Updater.CleanupOld();
+            bool updated = Array.IndexOf(args, "--updated") >= 0;
             bool created;
             using (var m = new Mutex(true, "Global\\Hydra-single-instance", out created))
             {
+                // После самообновления старый процесс ещё может завершаться — ждём его
+                if (!created && updated)
+                {
+                    try { created = m.WaitOne(20000); } catch (AbandonedMutexException) { created = true; }
+                    Updater.CleanupOld();
+                }
                 if (!created) { MessageBox.Show(I18n.L("Hydra уже запущена (иконка в трее)."), "Hydra"); return 0; }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
