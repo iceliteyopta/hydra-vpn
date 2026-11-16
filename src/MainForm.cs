@@ -1,0 +1,1073 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.IO;
+using System.Windows.Forms;
+
+namespace Hydra
+{
+    public class MainForm : Form
+    {
+        public const string AppName = "Hydra";
+        static readonly string DirectLabel = I18n.L("Напрямую");
+        static readonly string BlockLabel = I18n.L("Блокировать");
+        static MainForm() { } // статические поля — строго после I18n.Init
+
+        readonly ProfileStore store;
+        Profile P { get { return store.Profile; } }
+        readonly Engine engine = new Engine();
+        readonly Dictionary<string, string> statuses = new Dictionary<string, string>();
+        bool loading;
+        string state = "stopped";
+
+        Panel content;
+        readonly Dictionary<string, Control> pages = new Dictionary<string, Control>();
+        readonly Dictionary<string, NavButton> navs = new Dictionary<string, NavButton>();
+
+        // главная
+        PowerButton power;
+        Label lblStatus, lblSub;
+        FlowLayoutPanel homeChips;
+        Card killBanner;
+        Label killBannerText;
+        // туннели
+        FlowLayoutPanel tunnelList;
+        Label tunnelsEmpty;
+        // правила
+        DataGridView grid;
+        DataGridViewComboBoxColumn colTarget;
+        ComboBox cbFinal;
+        // защита
+        ToggleSwitch tgKill;
+        ComboBox cbKillTunnel;
+        ListBox lbApps;
+        TextBox tbKillDomains;
+        Label lblKillState;
+        // настройки
+        TextBox tbSingBox, tbOpenVpn, tbAwg, tbDns;
+        ToggleSwitch tgStrict;
+        ComboBox cbLogLevel, cbRuleSetDetour;
+        // журнал
+        TextBox txtLog;
+        // боковая панель
+        Label sideStatus;
+        PaintControl sideDot;
+        Color sideDotColor = Theme.Muted;
+        NotifyIcon tray;
+
+        static readonly string[][] Presets = {
+            new[] { "YouTube", "domain_suffix", "youtube.com, youtu.be, googlevideo.com, ytimg.com, ggpht.com, youtube-nocookie.com, youtubei.googleapis.com, yt.be, youtubekids.com" },
+            new[] { I18n.L("Telegram (домены)"), "domain_suffix", "telegram.org, t.me, telegram.me, telesco.pe, tdesktop.com, telegra.ph, cdn-telegram.org" },
+            new[] { I18n.L("Telegram (IP-сети)"), "ip_cidr", "91.108.4.0/22, 91.108.8.0/22, 91.108.12.0/22, 91.108.16.0/22, 91.108.20.0/22, 91.108.56.0/22, 149.154.160.0/20, 185.76.151.0/24, 95.161.64.0/20" },
+            new[] { "Discord", "domain_suffix", "discord.com, discord.gg, discordapp.com, discordapp.net, discord.media, discordcdn.com, discord.dev" },
+            new[] { "Instagram / Facebook / WhatsApp", "domain_suffix", "instagram.com, cdninstagram.com, facebook.com, fbcdn.net, fb.com, messenger.com, whatsapp.com, whatsapp.net" },
+            new[] { "X / Twitter", "domain_suffix", "x.com, twitter.com, twimg.com, t.co" },
+            new[] { I18n.L("ИИ-сервисы (ChatGPT, Claude, Gemini)"), "domain_suffix", "openai.com, chatgpt.com, oaistatic.com, oaiusercontent.com, anthropic.com, claude.ai, claude.com, gemini.google.com" },
+            new[] { I18n.L("Российские домены (.ru .рф .su)"), "domain_suffix", I18n.L("ru, рф, su") },
+            new[] { I18n.L("Российские IP (geoip-ru)"), "geoip", "ru" },
+            new[] { I18n.L("Реклама (geosite category-ads-all)"), "geosite", "category-ads-all" },
+        };
+
+        public MainForm()
+        {
+            store = ProfileStore.Load();
+            Text = AppName;
+            Font = Theme.Ui(9.5f);
+            ForeColor = Theme.Text;
+            BackColor = Theme.Bg;
+            AutoScaleMode = AutoScaleMode.Font;
+            Size = new Size(1180, 760);
+            MinimumSize = new Size(960, 620);
+            StartPosition = FormStartPosition.CenterScreen;
+            Icon = MakeIcon(false);
+            DoubleBuffered = true;
+
+            BuildUi();
+            loading = true;
+            LoadTunnels();
+            LoadRules();
+            LoadKill();
+            LoadSettings();
+            loading = false;
+
+            engine.Log += s => Ui(() => AppendLog(s));
+            engine.TunnelStatus += (n, st) => Ui(() => { statuses[n] = st; RefreshStatuses(); });
+            engine.StateChanged += st => Ui(() => OnState(st));
+            engine.KillChanged += on => Ui(RefreshKill);
+            OnState("stopped");
+            ShowPage("home");
+
+            HandleCreated += (s, e) => Theme.DarkTitleBar(this);
+            Shown += (s, e) => engine.SyncKillState();
+
+            if (AppPaths.SingBox(P) == null)
+                AppendLog(I18n.L("sing-box.exe не найден: положите его в ") + AppPaths.CoresDir + I18n.L(" (см. README.md)"));
+        }
+
+        void Ui(Action a)
+        {
+            if (IsDisposed) return;
+            try { if (InvokeRequired) BeginInvoke(a); else a(); } catch (ObjectDisposedException) { } catch (InvalidOperationException) { }
+        }
+
+        static Icon MakeIcon(bool on)
+        {
+            using (var bmp = new Bitmap(64, 64))
+            {
+                using (var g = Graphics.FromImage(bmp))
+                {
+                    Theme.Hq(g);
+                    var r = new RectangleF(4, 4, 56, 56);
+                    using (var br = new LinearGradientBrush(r, on ? Theme.Accent : Color.FromArgb(70, 80, 110), on ? Theme.Accent2 : Color.FromArgb(50, 56, 80), 45f))
+                        g.FillEllipse(br, r);
+                    using (var pen = new Pen(Color.FromArgb(10, 12, 20), 5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                    {
+                        g.DrawArc(pen, new RectangleF(16, 16, 32, 32), 200, 140);
+                        g.DrawArc(pen, new RectangleF(24, 24, 16, 16), 200, 140);
+                    }
+                }
+                return Icon.FromHandle(bmp.GetHicon());
+            }
+        }
+
+        // ======================= каркас =======================
+        void BuildUi()
+        {
+            var sidebar = new Panel { Dock = DockStyle.Left, Width = 236, BackColor = Theme.Sidebar, Padding = new Padding(14, 8, 14, 14) };
+            sidebar.Paint += (s, e) => { using (var pen = new Pen(Theme.Border)) e.Graphics.DrawLine(pen, sidebar.Width - 1, 0, sidebar.Width - 1, sidebar.Height); };
+
+            var nav = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, BackColor = Theme.Sidebar, Padding = new Padding(0, 12, 0, 0) };
+            AddNav(nav, "home", I18n.L("Главная"), Theme.IcHome);
+            AddNav(nav, "tunnels", I18n.L("Туннели"), Theme.IcGlobe);
+            AddNav(nav, "rules", I18n.L("Правила"), Theme.IcList);
+            AddNav(nav, "protect", I18n.L("Защита"), Theme.IcShield);
+            AddNav(nav, "settings", I18n.L("Настройки"), Theme.IcSettings);
+            AddNav(nav, "log", I18n.L("Журнал"), Theme.IcLog);
+
+            var bottom = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = Theme.Sidebar };
+            sideDot = new PaintControl { Size = new Size(14, 14), Location = new Point(6, 14) };
+            sideDot.Paint += (s, e) =>
+            {
+                Theme.Hq(e.Graphics);
+                using (var br = new SolidBrush(Theme.Alpha(sideDotColor, 60))) e.Graphics.FillEllipse(br, 0, 0, 13, 13);
+                using (var br = new SolidBrush(sideDotColor)) e.Graphics.FillEllipse(br, 3.5f, 3.5f, 6, 6);
+            };
+            sideStatus = new Label { AutoSize = true, Location = new Point(24, 12), ForeColor = Theme.Text, Font = Theme.UiSemi(9.5f), BackColor = Theme.Sidebar };
+            var ver = new Label { AutoSize = true, Location = new Point(24, 34), ForeColor = Theme.Muted, Font = Theme.Ui(8f), Text = "Hydra 2.0 · sing-box", BackColor = Theme.Sidebar };
+            bottom.Controls.Add(sideDot); bottom.Controls.Add(sideStatus); bottom.Controls.Add(ver);
+
+            sidebar.Controls.Add(nav);
+            sidebar.Controls.Add(bottom);
+            sidebar.Controls.Add(new Logo { Dock = DockStyle.Top });
+
+            content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
+            pages["home"] = BuildHome();
+            pages["tunnels"] = BuildTunnels();
+            pages["rules"] = BuildRules();
+            pages["protect"] = BuildProtect();
+            pages["settings"] = BuildSettings();
+            pages["log"] = BuildLog();
+            foreach (var p in pages.Values) { p.Visible = false; content.Controls.Add(p); }
+            Theme.Apply(content);
+
+            Controls.Add(content);
+            Controls.Add(sidebar);
+
+            tray = new NotifyIcon { Icon = MakeIcon(false), Text = AppName, Visible = true };
+            var menu = DarkMenu.Create();
+            menu.Items.Add(I18n.L("Открыть Hydra"), null, (s, e) => RestoreWindow());
+            menu.Items.Add(I18n.L("Подключить"), null, (s, e) => Connect());
+            menu.Items.Add(I18n.L("Отключить"), null, (s, e) => engine.Stop());
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(I18n.L("Выход"), null, (s, e) => Close());
+            tray.ContextMenuStrip = menu;
+            tray.DoubleClick += (s, e) => RestoreWindow();
+            Resize += (s, e) => { if (WindowState == FormWindowState.Minimized) Hide(); };
+            FormClosing += OnClosing;
+        }
+
+        void AddNav(FlowLayoutPanel nav, string key, string text, string glyph)
+        {
+            var b = new NavButton(text, glyph) { Width = 206 };
+            b.Click += (s, e) => ShowPage(key);
+            navs[key] = b;
+            nav.Controls.Add(b);
+        }
+
+        void ShowPage(string key)
+        {
+            foreach (var kv in pages) kv.Value.Visible = kv.Key == key;
+            foreach (var kv in navs) kv.Value.Active = kv.Key == key;
+            if (key == "home") RefreshHome();
+            if (key == "protect") RefreshKill();
+        }
+
+        public void ShowPageForTest(string key) { ShowPage(key); }
+
+        void RestoreWindow() { Show(); WindowState = FormWindowState.Normal; Activate(); }
+
+        // Страница: заголовок + (панель инструментов) + тело
+        Panel Page(string title, string subtitle, Control toolbar, Control body)
+        {
+            var page = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg, Padding = new Padding(34, 26, 34, 26) };
+            var header = new Panel { Dock = DockStyle.Top, Height = 86, BackColor = Theme.Bg };
+            header.Controls.Add(new Label { Text = title, Font = Theme.UiBold(20f), ForeColor = Theme.Text, AutoSize = true, Location = new Point(0, 0), BackColor = Theme.Bg });
+            header.Controls.Add(new Label { Text = subtitle, Font = Theme.Ui(9.5f), ForeColor = Theme.Muted, AutoSize = true, Location = new Point(2, 42), BackColor = Theme.Bg });
+            body.Dock = DockStyle.Fill;
+            page.Controls.Add(body);
+            if (toolbar != null) page.Controls.Add(toolbar);
+            page.Controls.Add(header);
+            return page;
+        }
+
+        FlowLayoutPanel Toolbar(params Control[] items)
+        {
+            var tb = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 52, BackColor = Theme.Bg, WrapContents = false };
+            tb.Controls.AddRange(items);
+            return tb;
+        }
+
+        static Label Hint(string text)
+        {
+            return new Label { Text = text, AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Ui(9f), BackColor = Color.Transparent, MaximumSize = new Size(560, 0) };
+        }
+
+        // ======================= главная =======================
+        Control BuildHome()
+        {
+            var body = new Panel { BackColor = Theme.Bg };
+
+            killBanner = new Card { Height = 60, Fill = Theme.Mix(Theme.Surface, Theme.Warn, 0.10f), Visible = false };
+            killBannerText = new Label { AutoSize = true, ForeColor = Theme.Warn, Font = Theme.UiSemi(9.5f), Location = new Point(18, 20), BackColor = Color.Transparent };
+            var release = new FlatButton(I18n.L("Снять блокировку"), Theme.IcUnlock, ButtonKind.Secondary);
+            release.Click += (s, e) => engine.ReleaseKill();
+            killBanner.Controls.Add(killBannerText);
+            killBanner.Controls.Add(release);
+            killBanner.Resize += (s, e) => release.Location = new Point(killBanner.Width - release.Width - 14, 12);
+
+            power = new PowerButton();
+            power.Click += (s, e) => { if (state == "connected" || state == "connecting") engine.Stop(); else if (state == "stopped") Connect(); };
+            lblStatus = new Label { AutoSize = true, Font = Theme.UiBold(22f), ForeColor = Theme.Text, BackColor = Theme.Bg };
+            lblSub = new Label { AutoSize = true, Font = Theme.Ui(10f), ForeColor = Theme.Muted, BackColor = Theme.Bg };
+            homeChips = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Bg, MaximumSize = new Size(760, 0) };
+
+            body.Controls.Add(killBanner);
+            body.Controls.Add(power);
+            body.Controls.Add(lblStatus);
+            body.Controls.Add(lblSub);
+            body.Controls.Add(homeChips);
+            body.Resize += (s, e) => LayoutHome(body);
+            homeChips.SizeChanged += (s, e) => LayoutHome(body);
+            lblStatus.SizeChanged += (s, e) => LayoutHome(body);
+            lblSub.SizeChanged += (s, e) => LayoutHome(body);
+
+            return Page(I18n.L("Главная"), I18n.L("Несколько туннелей одновременно — трафик идёт по вашим правилам"), null, body);
+        }
+
+        void LayoutHome(Control body)
+        {
+            int w = body.ClientSize.Width;
+            killBanner.Width = w; killBanner.Location = new Point(0, 0);
+            int top = killBanner.Visible ? 76 : 10;
+            power.Location = new Point((w - power.Width) / 2, top);
+            lblStatus.Location = new Point((w - lblStatus.Width) / 2, power.Bottom + 6);
+            lblSub.Location = new Point((w - lblSub.Width) / 2, lblStatus.Bottom + 4);
+            homeChips.Location = new Point(Math.Max(0, (w - homeChips.Width) / 2), lblSub.Bottom + 22);
+        }
+
+        void RefreshHome()
+        {
+            bool on = state == "connected";
+            lblStatus.Text = on ? I18n.L("Защищено") : state == "connecting" ? I18n.L("Подключение…") : state == "stopping" ? I18n.L("Отключение…") : I18n.L("Не подключено");
+            lblStatus.ForeColor = on ? Theme.Accent : Theme.Text;
+            string fin = ToTargetLabel(P.Final ?? "direct");
+            lblSub.Text = on ? I18n.L("Остальной трафик: ") + fin + (P.KillSwitch ? I18n.L("   ·   Kill switch активен") : "")
+                             : I18n.L("Нажмите на кнопку, чтобы поднять все включённые туннели");
+
+            homeChips.SuspendLayout();
+            homeChips.Controls.Clear();
+            foreach (var t in P.Tunnels)
+            {
+                if (!t.Enabled) continue;
+                string st = StatusOf(t);
+                homeChips.Controls.Add(new Chip(t.Name + "  ·  " + TypeLabel(t) + (st.Length > 0 ? "  ·  " + st : ""), st.Length > 0 ? TunnelCard.StatusColor(st) : Theme.Border));
+            }
+            if (P.KillSwitch)
+                homeChips.Controls.Add(new Chip("Kill switch" + (engine.KillActive ? I18n.L(" · блокирует без VPN") : I18n.L(" · включится при подключении")), engine.KillActive ? Theme.Accent : Theme.Border));
+            homeChips.ResumeLayout();
+
+            killBanner.Visible = engine.KillActive && state == "stopped";
+            killBannerText.Text = I18n.L("VPN не работает, а kill switch держит блокировку: защищённые программы и адреса без VPN не выйдут в интернет.");
+            LayoutHome(power.Parent);
+        }
+
+        // ======================= туннели =======================
+        Control BuildTunnels()
+        {
+            var add = new FlatButton(I18n.L("Добавить по ссылке"), Theme.IcLink, ButtonKind.Primary);
+            add.Click += (s, e) => AddLinks();
+            var ovpn = new FlatButton("OpenVPN (.ovpn)", Theme.IcFile, ButtonKind.Secondary);
+            ovpn.Click += (s, e) => ImportOvpn();
+            var wg = new FlatButton("WireGuard / AmneziaWG (.conf)", Theme.IcFile, ButtonKind.Secondary);
+            wg.Click += (s, e) => ImportWg();
+
+            var body = new Panel { BackColor = Theme.Bg };
+            tunnelList = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Theme.Bg, Padding = new Padding(0, 4, 0, 0) };
+            tunnelList.Resize += (s, e) => SizeCards();
+            tunnelsEmpty = new Label { Text = I18n.L("Туннелей пока нет. Добавьте ссылку vless://, hy2://, … или импортируйте .ovpn / .conf."), AutoSize = true, ForeColor = Theme.Muted, Location = new Point(4, 10), BackColor = Theme.Bg };
+            body.Controls.Add(tunnelList);
+            body.Controls.Add(tunnelsEmpty);
+            tunnelsEmpty.BringToFront();
+            return Page(I18n.L("Туннели"), I18n.L("Все включённые туннели поднимаются одновременно"), Toolbar(add, ovpn, wg), body);
+        }
+
+        void SizeCards()
+        {
+            int w = tunnelList.ClientSize.Width - 6;
+            foreach (Control c in tunnelList.Controls) c.Width = Math.Max(300, w);
+        }
+
+        void LoadTunnels()
+        {
+            tunnelList.SuspendLayout();
+            tunnelList.Controls.Clear();
+            foreach (var t in P.Tunnels)
+            {
+                var card = new TunnelCard(t, TypeLabel(t)) { Status = StatusOf(t) };
+                var tun = t;
+                card.Toggle.CheckedChanged += (s, e) =>
+                {
+                    if (loading) return;
+                    tun.Enabled = card.Toggle.Checked; Save(); card.Invalidate(); RefreshTargets();
+                };
+                card.MenuButton.Click += (s, e) => TunnelMenu(tun).Show(card.MenuButton, new Point(0, card.MenuButton.Height));
+                card.DoubleClick += (s, e) => RenameTunnel(tun);
+                tunnelList.Controls.Add(card);
+            }
+            tunnelList.ResumeLayout();
+            SizeCards();
+            tunnelsEmpty.Visible = P.Tunnels.Count == 0;
+            RefreshTargets();
+            if (homeChips != null) RefreshHome();
+        }
+
+        ContextMenuStrip TunnelMenu(Tunnel t)
+        {
+            var m = DarkMenu.Create();
+            m.Items.Add(I18n.L("Переименовать…"), null, (s, e) => RenameTunnel(t));
+            if (t.Type == TunnelTypes.OpenVpn)
+            {
+                m.Items.Add(I18n.L("Логин и пароль OpenVPN…"), null, (s, e) => SetOvpnCreds(t));
+                m.Items.Add(I18n.L("Драйвер OpenVPN…"), null, (s, e) => SetOvpnDriver(t));
+            }
+            m.Items.Add(I18n.L("DNS внутри туннеля…"), null, (s, e) => SetTunnelDns(t));
+            m.Items.Add(new ToolStripSeparator());
+            var del = m.Items.Add(I18n.L("Удалить"), null, (s, e) => DeleteTunnel(t));
+            del.ForeColor = Theme.Bad;
+            return m;
+        }
+
+        void RefreshStatuses()
+        {
+            foreach (Control c in tunnelList.Controls)
+            {
+                var card = c as TunnelCard;
+                if (card == null) continue;
+                card.Status = StatusOf(card.Tunnel);
+                card.Invalidate();
+            }
+            RefreshHome();
+        }
+
+        string StatusOf(Tunnel t)
+        {
+            string s;
+            return statuses.TryGetValue(t.Name, out s) ? s : "";
+        }
+
+        static string TypeLabel(Tunnel t)
+        {
+            switch (t.Type)
+            {
+                case "vless": return "VLESS";
+                case "vmess": return "VMess";
+                case "trojan": return "Trojan";
+                case "shadowsocks": return "Shadowsocks";
+                case "hysteria2": return "Hysteria2";
+                case "hysteria": return "Hysteria";
+                case "tuic": return "TUIC";
+                case TunnelTypes.WireGuard: return "WireGuard";
+                case TunnelTypes.AmneziaWg: return "AmneziaWG";
+                case TunnelTypes.OpenVpn: return ConfigBuilder.IsNativeOvpn(t) ? "OpenVPN" : "OpenVPN · " + t.OvpnDriver;
+            }
+            return t.Type;
+        }
+
+        // ======================= правила =======================
+        Control BuildRules()
+        {
+            var add = new FlatButton(I18n.L("Добавить правило"), Theme.IcAdd, ButtonKind.Primary);
+            add.Click += (s, e) => AddRule(new Rule { Target = FirstTunnelOrDirect() });
+            var presets = new FlatButton(I18n.L("Шаблоны"), Theme.IcTemplate, ButtonKind.Secondary);
+            var pm = DarkMenu.Create();
+            foreach (var pr in Presets)
+            {
+                var preset = pr;
+                pm.Items.Add(preset[0], null, (s, e) =>
+                {
+                    bool ru = preset[0].StartsWith(I18n.L("Российские"));
+                    bool ads = preset[2] == "category-ads-all";
+                    AddRule(new Rule { Kind = preset[1], Values = preset[2], Target = ads ? "block" : ru ? "direct" : FirstTunnelOrDirect() });
+                });
+            }
+            presets.Click += (s, e) => pm.Show(presets, new Point(0, presets.Height + 2));
+            var up = new FlatButton(I18n.L("Выше"), Theme.IcUp, ButtonKind.Secondary);
+            up.Click += (s, e) => MoveRule(-1);
+            var down = new FlatButton(I18n.L("Ниже"), Theme.IcDown, ButtonKind.Secondary);
+            down.Click += (s, e) => MoveRule(1);
+            var del = new FlatButton(I18n.L("Удалить"), Theme.IcDelete, ButtonKind.Danger);
+            del.Click += (s, e) => { if (grid.CurrentRow != null) { grid.Rows.Remove(grid.CurrentRow); SaveRules(); } };
+
+            grid = new DataGridView
+            {
+                Dock = DockStyle.Fill,
+                AllowUserToAddRows = false,
+                AllowUserToResizeRows = false,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+                MultiSelect = false,
+            };
+            Theme.StyleGrid(grid);
+            grid.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "", Width = 48 });
+            var colKind = new DataGridViewComboBoxColumn { HeaderText = I18n.L("ЧТО"), Width = 190, FlatStyle = FlatStyle.Flat, DisplayStyle = DataGridViewComboBoxDisplayStyle.Nothing };
+            foreach (var k in RuleKinds.All) colKind.Items.Add(k[1]);
+            grid.Columns.Add(colKind);
+            grid.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = I18n.L("ЗНАЧЕНИЯ (ЧЕРЕЗ ЗАПЯТУЮ)"), AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
+            colTarget = new DataGridViewComboBoxColumn { HeaderText = I18n.L("КУДА"), Width = 190, FlatStyle = FlatStyle.Flat, DisplayStyle = DataGridViewComboBoxDisplayStyle.Nothing };
+            grid.Columns.Add(colTarget);
+            grid.CurrentCellDirtyStateChanged += (s, e) => { if (grid.IsCurrentCellDirty && !(grid.CurrentCell is DataGridViewTextBoxCell)) grid.CommitEdit(DataGridViewDataErrorContexts.Commit); };
+            grid.CellValueChanged += (s, e) => SaveRules();
+            grid.UserDeletedRow += (s, e) => SaveRules();
+            grid.DataError += (s, e) => { e.ThrowException = false; };
+            grid.EditingControlShowing += (s, e) =>
+            {
+                e.Control.BackColor = Theme.Surface2; e.Control.ForeColor = Theme.Text;
+                var cb = e.Control as ComboBox;
+                if (cb != null) cb.FlatStyle = FlatStyle.Flat;
+            };
+            grid.CellPainting += PaintRuleCell;
+
+            var gridCard = new Card { Padding = new Padding(10) };
+            gridCard.Controls.Add(grid);
+
+            var bottom = new Card { Dock = DockStyle.Bottom, Height = 70, Padding = new Padding(18, 0, 18, 0) };
+            var lbl = new Label { Text = I18n.L("Весь остальной трафик"), AutoSize = true, Font = Theme.UiSemi(10f), ForeColor = Theme.Text, Location = new Point(18, 24), BackColor = Color.Transparent };
+            cbFinal = new DarkCombo { Width = 240, Location = new Point(228, 20) };
+            cbFinal.SelectedIndexChanged += (s, e) =>
+            {
+                if (loading || cbFinal.SelectedItem == null) return;
+                P.Final = FromTargetLabel((string)cbFinal.SelectedItem);
+                Save(); RefreshHome();
+            };
+            var hint = Hint(I18n.L("Проверяются сверху вниз, срабатывает первое подходящее правило."));
+            hint.Location = new Point(490, 18);
+            bottom.Resize += (s, e) => hint.MaximumSize = new Size(Math.Max(120, bottom.Width - 510), 0);
+            bottom.Controls.Add(lbl); bottom.Controls.Add(cbFinal); bottom.Controls.Add(hint);
+
+            var body = new Panel { BackColor = Theme.Bg };
+            gridCard.Dock = DockStyle.Fill;
+            body.Controls.Add(gridCard);
+            body.Controls.Add(new Panel { Dock = DockStyle.Bottom, Height = 12, BackColor = Theme.Bg });
+            body.Controls.Add(bottom);
+            return Page(I18n.L("Правила"), I18n.L("Что куда направлять: домены, IP, программы, порты"), Toolbar(add, presets, up, down, del), body);
+        }
+
+        void PaintRuleCell(object sender, DataGridViewCellPaintingEventArgs e)
+        {
+            if (e.RowIndex < 0) return;
+            if (e.ColumnIndex == 0)
+            {
+                e.PaintBackground(e.CellBounds, true);
+                bool on = e.Value is bool && (bool)e.Value;
+                var g = e.Graphics; Theme.Hq(g);
+                var r = new RectangleF(e.CellBounds.X + (e.CellBounds.Width - 18) / 2f, e.CellBounds.Y + (e.CellBounds.Height - 18) / 2f, 18, 18);
+                using (var path = Theme.Round(r, 5))
+                {
+                    if (on) using (var br = new LinearGradientBrush(r, Theme.Accent, Theme.Accent2, 45f)) g.FillPath(br, path);
+                    else using (var br = new SolidBrush(Theme.Surface2)) g.FillPath(br, path);
+                    using (var pen = new Pen(on ? Theme.Accent : Theme.Border)) g.DrawPath(pen, path);
+                }
+                if (on)
+                    using (var pen = new Pen(Color.FromArgb(8, 10, 18), 2.2f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                        g.DrawLines(pen, new[] { new PointF(r.X + 4.5f, r.Y + 9.5f), new PointF(r.X + 7.8f, r.Y + 12.8f), new PointF(r.X + 13.8f, r.Y + 5.8f) });
+                e.Handled = true;
+            }
+            else if (e.ColumnIndex == 3)
+            {
+                // «Куда» рисуем плашкой
+                e.PaintBackground(e.CellBounds, true);
+                string v = e.Value as string ?? "";
+                var g = e.Graphics; Theme.Hq(g);
+                Color c = v == DirectLabel ? Theme.Good : v == BlockLabel ? Theme.Bad : Theme.Accent;
+                using (var f = Theme.UiSemi(9f))
+                {
+                    var sz = g.MeasureString(v, f);
+                    var r = new RectangleF(e.CellBounds.X + 8, e.CellBounds.Y + (e.CellBounds.Height - 24) / 2f, Math.Min(sz.Width + 18, e.CellBounds.Width - 16), 24);
+                    using (var path = Theme.Round(r, 12))
+                    using (var br = new SolidBrush(Theme.Alpha(c, 38))) g.FillPath(br, path);
+                    using (var br = new SolidBrush(Theme.Mix(c, Color.White, 0.25f))) g.DrawString(v, f, br, new RectangleF(r.X + 9, r.Y + 4, r.Width - 12, 18), new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
+                }
+                e.Handled = true;
+            }
+        }
+
+        // ======================= защита (kill switch) =======================
+        Control BuildProtect()
+        {
+            var body = new Panel { BackColor = Theme.Bg };
+
+            var top = new Card { Dock = DockStyle.Top, Height = 150 };
+            tgKill = new ToggleSwitch { Location = new Point(20, 24) };
+            tgKill.CheckedChanged += (s, e) => { if (loading) return; P.KillSwitch = tgKill.Checked; Save(); RefreshKill(); RefreshHome(); };
+            top.Controls.Add(tgKill);
+            top.Controls.Add(new Label { Text = I18n.L("Kill switch для выбранных программ и сайтов"), Font = Theme.UiSemi(12f), ForeColor = Theme.Text, AutoSize = true, Location = new Point(80, 20), BackColor = Color.Transparent });
+            var desc = Hint(I18n.L("Пока VPN включён, эти программы и адреса ходят только через туннель. Если VPN упадёт, брандмауэр Windows не выпустит их в интернет напрямую — до переподключения или пока вы не снимете блокировку."));
+            desc.Location = new Point(82, 50);
+            top.Resize += (s, e) => desc.MaximumSize = new Size(Math.Max(200, top.Width - 110), 0);
+            top.Controls.Add(desc);
+            lblKillState = new Label { AutoSize = true, Font = Theme.UiSemi(9f), Location = new Point(82, 114), BackColor = Color.Transparent };
+            top.Controls.Add(lblKillState);
+
+            var route = new Card { Dock = DockStyle.Top, Height = 70 };
+            route.Controls.Add(new Label { Text = I18n.L("Через туннель"), Font = Theme.UiSemi(10f), ForeColor = Theme.Text, AutoSize = true, Location = new Point(20, 24), BackColor = Color.Transparent });
+            cbKillTunnel = new DarkCombo { Width = 260, Location = new Point(170, 20) };
+            cbKillTunnel.SelectedIndexChanged += (s, e) =>
+            {
+                if (loading || cbKillTunnel.SelectedItem == null) return;
+                string v = (string)cbKillTunnel.SelectedItem;
+                P.KillTunnel = v.StartsWith(I18n.L("Как «остальной")) ? "" : v; Save();
+            };
+            route.Controls.Add(cbKillTunnel);
+            var rh = Hint(I18n.L("Защищённый трафик никогда не идёт напрямую, даже если совпадёт с правилом «Напрямую»."));
+            rh.Location = new Point(452, 17);
+            route.Resize += (s, e) => rh.MaximumSize = new Size(Math.Max(120, route.Width - 470), 0);
+            route.Controls.Add(rh);
+
+            // приложения + домены
+            var split = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, BackColor = Theme.Bg };
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 58));
+            split.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 42));
+
+            var appsCard = new Card { Dock = DockStyle.Fill, Margin = new Padding(0, 0, 8, 0) };
+            var appsHead = new Label { Text = I18n.L("Программы"), Font = Theme.UiSemi(11f), ForeColor = Theme.Text, AutoSize = true, Dock = DockStyle.Top, BackColor = Color.Transparent };
+            var appsHint = new Label { Text = I18n.L("Пути к .exe, в пути можно использовать *"), ForeColor = Theme.Muted, AutoSize = false, Height = 26, Dock = DockStyle.Top, BackColor = Color.Transparent };
+            lbApps = new ListBox { Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = Theme.Surface, ForeColor = Theme.Text, DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = 34, IntegralHeight = false };
+            lbApps.DrawItem += DrawAppItem;
+            var appsBtns = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 46, BackColor = Theme.Surface, Padding = new Padding(0, 8, 0, 0), WrapContents = false };
+            var addExe = new FlatButton(I18n.L("Файл .exe"), Theme.IcApp, ButtonKind.Secondary);
+            addExe.Click += (s, e) => AddKillExe();
+            var addPat = new FlatButton(I18n.L("Шаблон"), Theme.IcAdd, ButtonKind.Secondary);
+            addPat.Click += (s, e) =>
+            {
+                string v = Dialogs.Input(this, I18n.L("Шаблон пути"), I18n.L("Например: %LOCALAPPDATA%\\Programs\\App\\app.exe или C:\\Program Files\\WindowsApps\\App_*\\app.exe"), "");
+                if (!string.IsNullOrEmpty(v)) { P.KillApps.Add(v); Save(); LoadKill(); }
+            };
+            var delApp = new FlatButton("", Theme.IcDelete, ButtonKind.Danger) { Width = 40 };
+            delApp.Click += (s, e) => { if (lbApps.SelectedIndex >= 0) { P.KillApps.RemoveAt(lbApps.SelectedIndex); Save(); LoadKill(); } };
+            var defApps = new FlatButton("Claude", Theme.IcShield, ButtonKind.Ghost);
+            defApps.Click += (s, e) =>
+            {
+                foreach (var a in KillSwitch.DefaultApps) if (!P.KillApps.Contains(a)) P.KillApps.Add(a);
+                Save(); LoadKill();
+            };
+            appsBtns.Controls.AddRange(new Control[] { addExe, addPat, defApps, delApp });
+            appsCard.Controls.Add(lbApps);
+            appsCard.Controls.Add(appsBtns);
+            appsCard.Controls.Add(appsHint);
+            appsCard.Controls.Add(appsHead);
+
+            var domCard = new Card { Dock = DockStyle.Fill, Margin = new Padding(8, 0, 0, 0) };
+            var domHead = new Label { Text = I18n.L("Сайты и адреса"), Font = Theme.UiSemi(11f), ForeColor = Theme.Text, AutoSize = true, Dock = DockStyle.Top, BackColor = Color.Transparent };
+            var domHint = new Label { Text = I18n.L("Через запятую, вместе с поддоменами"), ForeColor = Theme.Muted, AutoSize = false, Height = 26, Dock = DockStyle.Top, BackColor = Color.Transparent };
+            tbKillDomains = new TextBox { Dock = DockStyle.Fill, Multiline = true, BorderStyle = BorderStyle.None, BackColor = Theme.Surface2, ForeColor = Theme.Text, Font = Theme.Mono(9.5f), ScrollBars = ScrollBars.Vertical };
+            tbKillDomains.TextChanged += (s, e) => { if (!loading) { P.KillDomains = tbKillDomains.Text; Save(); } };
+            var domWrap = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Surface2, Padding = new Padding(10) };
+            domWrap.Controls.Add(tbKillDomains);
+            domCard.Controls.Add(domWrap);
+            domCard.Controls.Add(domHint);
+            domCard.Controls.Add(domHead);
+
+            split.Controls.Add(appsCard, 0, 0);
+            split.Controls.Add(domCard, 1, 0);
+
+            body.Controls.Add(split);
+            body.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg });
+            body.Controls.Add(route);
+            body.Controls.Add(new Panel { Dock = DockStyle.Top, Height = 12, BackColor = Theme.Bg });
+            body.Controls.Add(top);
+            return Page(I18n.L("Защита"), I18n.L("Kill switch: без VPN — без интернета для важных программ"), null, body);
+        }
+
+        void DrawAppItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+            var g = e.Graphics; Theme.Hq(g);
+            bool sel = (e.State & DrawItemState.Selected) != 0;
+            using (var br = new SolidBrush(sel ? Theme.Mix(Theme.Surface, Theme.Accent, 0.15f) : Theme.Surface)) g.FillRectangle(br, e.Bounds);
+            string path = (string)lbApps.Items[e.Index];
+            string name = Path.GetFileName(path);
+            using (var f = Theme.Icon(11f)) using (var br = new SolidBrush(Theme.Accent)) g.DrawString(Theme.IcApp, f, br, e.Bounds.X + 6, e.Bounds.Y + 9);
+            using (var f = Theme.UiSemi(9.5f)) using (var br = new SolidBrush(Theme.Text)) g.DrawString(name, f, br, e.Bounds.X + 30, e.Bounds.Y + 1);
+            using (var f = Theme.Ui(8f)) using (var br = new SolidBrush(Theme.Muted))
+                g.DrawString(path, f, br, new RectangleF(e.Bounds.X + 30, e.Bounds.Y + 17, e.Bounds.Width - 34, 16), new StringFormat { Trimming = StringTrimming.EllipsisPath, FormatFlags = StringFormatFlags.NoWrap });
+        }
+
+        void AddKillExe()
+        {
+            using (var d = new OpenFileDialog { Filter = I18n.L("Программа (*.exe)|*.exe") })
+            {
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                if (!P.KillApps.Contains(d.FileName)) P.KillApps.Add(d.FileName);
+                Save(); LoadKill();
+            }
+        }
+
+        void LoadKill()
+        {
+            bool was = loading; loading = true;
+            tgKill.SetSilently(P.KillSwitch);
+            lbApps.Items.Clear();
+            foreach (var a in P.KillApps) lbApps.Items.Add(a);
+            tbKillDomains.Text = P.KillDomains ?? "";
+            loading = was;
+            RefreshKill();
+        }
+
+        void RefreshKill()
+        {
+            if (lblKillState == null) return;
+            if (engine.KillActive && state != "connected") { lblKillState.Text = I18n.L("●  Блокировка активна: VPN не работает, защищённые программы отрезаны от интернета"); lblKillState.ForeColor = Theme.Warn; }
+            else if (engine.KillActive) { lblKillState.Text = I18n.L("●  Работает: правила брандмауэра установлены"); lblKillState.ForeColor = Theme.Good; }
+            else if (P.KillSwitch) { lblKillState.Text = I18n.L("●  Включится при подключении VPN"); lblKillState.ForeColor = Theme.Accent; }
+            else { lblKillState.Text = I18n.L("●  Выключен"); lblKillState.ForeColor = Theme.Muted; }
+            if (homeChips != null && pages.ContainsKey("home") && pages["home"].Visible) RefreshHome();
+        }
+
+        // ======================= настройки =======================
+        Control BuildSettings()
+        {
+            var card = new Card { Padding = new Padding(22, 18, 22, 18), AutoScroll = true };
+            var tl = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 3, BackColor = Theme.Surface };
+            tl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
+            tl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            tl.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52));
+
+            tbSingBox = PathRow(tl, "sing-box.exe", I18n.L("пусто — cores\\sing-box.exe"));
+            tbOpenVpn = PathRow(tl, "openvpn.exe", I18n.L("нужен только для драйверов dco / wintun / tap"));
+            tbAwg = PathRow(tl, "amneziawg-go.exe", I18n.L("пусто — cores\\amneziawg\\amneziawg-go.exe"));
+
+            tbDns = new TextBox { Dock = DockStyle.Fill };
+            tbDns.TextChanged += (s, e) => { if (!loading) { P.DefaultDns = tbDns.Text.Trim(); Save(); } };
+            AddRow(tl, I18n.L("DNS по умолчанию"), tbDns, I18n.L("local — системный; или 77.88.8.8, tls://1.1.1.1, https://1.1.1.1/dns-query"));
+
+            cbRuleSetDetour = new DarkCombo { Width = 260 };
+            cbRuleSetDetour.SelectedIndexChanged += (s, e) =>
+            {
+                if (loading || cbRuleSetDetour.SelectedItem == null) return;
+                P.RuleSetDetour = FromTargetLabel((string)cbRuleSetDetour.SelectedItem); Save();
+            };
+            AddRow(tl, I18n.L("Скачивать geosite / geoip через"), cbRuleSetDetour, I18n.L("GitHub бывает недоступен напрямую — лучше через туннель"));
+
+            cbLogLevel = new DarkCombo { Width = 140 };
+            cbLogLevel.Items.AddRange(new object[] { "error", "warn", "info", "debug" });
+            cbLogLevel.SelectedIndexChanged += (s, e) => { if (!loading && cbLogLevel.SelectedItem != null) { P.LogLevel = (string)cbLogLevel.SelectedItem; Save(); } };
+            AddRow(tl, I18n.L("Подробность журнала"), cbLogLevel, I18n.L("warn — только проблемы, info — каждое соединение"));
+
+            tgStrict = new ToggleSwitch();
+            tgStrict.CheckedChanged += (s, e) => { if (!loading) { P.StrictRoute = tgStrict.Checked; Save(); } };
+            AddRow(tl, I18n.L("Строгая маршрутизация"), tgStrict, I18n.L("strict_route: защита от утечек DNS. Если что-то сломалось — выключите"));
+
+            var cbLang = new DarkCombo { Width = 200 };
+            cbLang.Items.AddRange(new object[] { "Auto / Авто", "Русский", "English" });
+            string curLang = (P.Language ?? "auto").ToLowerInvariant();
+            cbLang.SelectedIndex = curLang == "ru" ? 1 : curLang == "en" ? 2 : 0;
+            cbLang.SelectedIndexChanged += (s, e) =>
+            {
+                P.Language = cbLang.SelectedIndex == 1 ? "ru" : cbLang.SelectedIndex == 2 ? "en" : "auto";
+                Save();
+                MessageBox.Show(this, I18n.L("Перезапустите Hydra, чтобы сменить язык."), AppName);
+            };
+            AddRow(tl, I18n.L("Язык") + " / Language", cbLang, null);
+
+            var folder = new FlatButton(I18n.L("Открыть папку Hydra"), Theme.IcFolder, ButtonKind.Secondary);
+            folder.Click += (s, e) => Process.Start("explorer.exe", "\"" + AppPaths.BaseDir + "\"");
+            var preview = new FlatButton(I18n.L("Показать конфиг sing-box"), Theme.IcCode, ButtonKind.Secondary);
+            preview.Click += (s, e) => PreviewConfig();
+            var btns = new FlowLayoutPanel { AutoSize = true, BackColor = Theme.Surface, Margin = new Padding(0, 14, 0, 0) };
+            btns.Controls.Add(folder); btns.Controls.Add(preview);
+            int row = tl.RowCount++;
+            tl.Controls.Add(btns, 1, row);
+
+            card.Controls.Add(tl);
+            return Page(I18n.L("Настройки"), I18n.L("Ядра, DNS и прочее"), null, card);
+        }
+
+        TextBox PathRow(TableLayoutPanel tl, string label, string hint)
+        {
+            var tb = new TextBox { Dock = DockStyle.Fill };
+            tb.TextChanged += (s, e) => { if (!loading) SaveSettings(); };
+            var b = new FlatButton("", Theme.IcFolder, ButtonKind.Secondary) { Width = 40, Height = 30, Margin = new Padding(6, 0, 0, 0) };
+            b.Click += (s, e) =>
+            {
+                using (var d = new OpenFileDialog { Filter = I18n.L("Программа (*.exe)|*.exe") })
+                    if (d.ShowDialog(this) == DialogResult.OK) tb.Text = d.FileName;
+            };
+            int row = tl.RowCount++;
+            tl.Controls.Add(RowLabel(label), 0, row);
+            tl.Controls.Add(tb, 1, row);
+            tl.Controls.Add(b, 2, row);
+            if (hint != null) HintRow(tl, hint);
+            return tb;
+        }
+
+        void AddRow(TableLayoutPanel tl, string label, Control c, string hint)
+        {
+            int row = tl.RowCount++;
+            tl.Controls.Add(RowLabel(label), 0, row);
+            tl.Controls.Add(c, 1, row);
+            if (hint != null) HintRow(tl, hint);
+        }
+
+        static Label RowLabel(string text)
+        {
+            return new Label { Text = text, AutoSize = true, Font = Theme.UiSemi(9.5f), ForeColor = Theme.Text, Margin = new Padding(0, 7, 0, 0), BackColor = Color.Transparent };
+        }
+
+        void HintRow(TableLayoutPanel tl, string hint)
+        {
+            int row = tl.RowCount++;
+            tl.Controls.Add(new Label { Text = hint, AutoSize = true, ForeColor = Theme.Muted, Font = Theme.Ui(8.5f), Margin = new Padding(3, 2, 0, 6), BackColor = Color.Transparent }, 1, row);
+        }
+
+        // ======================= журнал =======================
+        Control BuildLog()
+        {
+            var copy = new FlatButton(I18n.L("Копировать"), Theme.IcCopy, ButtonKind.Secondary);
+            copy.Click += (s, e) => { try { if (txtLog.TextLength > 0) Clipboard.SetText(txtLog.Text); } catch { } };
+            var clear = new FlatButton(I18n.L("Очистить"), Theme.IcClear, ButtonKind.Secondary);
+            clear.Click += (s, e) => txtLog.Clear();
+            txtLog = new TextBox
+            {
+                Dock = DockStyle.Fill, Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, WordWrap = false,
+                Font = Theme.Mono(9f), BackColor = Color.FromArgb(11, 14, 24), ForeColor = Color.FromArgb(150, 225, 205), BorderStyle = BorderStyle.None,
+            };
+            var card = new Card { Padding = new Padding(14), Fill = Color.FromArgb(11, 14, 24) };
+            card.BackColor = Color.FromArgb(11, 14, 24);
+            card.Controls.Add(txtLog);
+            return Page(I18n.L("Журнал"), I18n.L("Что происходит внутри: sing-box, туннели, kill switch"), Toolbar(copy, clear), card);
+        }
+
+        void AppendLog(string s)
+        {
+            if (txtLog.TextLength > 400000) txtLog.Text = txtLog.Text.Substring(200000);
+            txtLog.AppendText(s + Environment.NewLine);
+        }
+
+        // ======================= данные =======================
+        void Save()
+        {
+            try { store.Save(); } catch (Exception ex) { AppendLog(I18n.L("Не удалось сохранить профиль: ") + ex.Message); }
+        }
+
+        string ToTargetLabel(string t) { return t == "direct" ? DirectLabel : t == "block" ? BlockLabel : t; }
+        string FromTargetLabel(string l) { return l == DirectLabel ? "direct" : l == BlockLabel ? "block" : l; }
+
+        string FirstTunnelOrDirect()
+        {
+            foreach (var t in P.Tunnels) if (t.Enabled) return t.Name;
+            return "direct";
+        }
+
+        void RefreshTargets()
+        {
+            if (colTarget == null || cbFinal == null) return;
+            bool was = loading; loading = true;
+            var names = new List<string> { DirectLabel, BlockLabel };
+            foreach (var t in P.Tunnels) names.Add(t.Name);
+            foreach (var r in P.Rules) { string l = ToTargetLabel(r.Target); if (!names.Contains(l)) names.Add(l); }
+
+            colTarget.Items.Clear();
+            foreach (var n in names) colTarget.Items.Add(n);
+
+            cbFinal.Items.Clear();
+            cbRuleSetDetour.Items.Clear();
+            foreach (var n in names)
+            {
+                if (n == BlockLabel) continue;
+                cbFinal.Items.Add(n);
+                cbRuleSetDetour.Items.Add(n);
+            }
+            string fl = ToTargetLabel(P.Final ?? "direct");
+            if (!cbFinal.Items.Contains(fl)) cbFinal.Items.Add(fl);
+            cbFinal.SelectedItem = fl;
+            string rl = ToTargetLabel(P.RuleSetDetour ?? "direct");
+            if (!cbRuleSetDetour.Items.Contains(rl)) cbRuleSetDetour.Items.Add(rl);
+            cbRuleSetDetour.SelectedItem = rl;
+
+            if (cbKillTunnel != null)
+            {
+                cbKillTunnel.Items.Clear();
+                string auto = I18n.L("Как «остальной трафик»");
+                cbKillTunnel.Items.Add(auto);
+                foreach (var t in P.Tunnels) cbKillTunnel.Items.Add(t.Name);
+                cbKillTunnel.SelectedItem = string.IsNullOrEmpty(P.KillTunnel) || P.Find(P.KillTunnel) == null ? auto : P.KillTunnel;
+            }
+            loading = was;
+        }
+
+        void LoadRules()
+        {
+            bool was = loading; loading = true;
+            RefreshTargets();
+            grid.Rows.Clear();
+            foreach (var r in P.Rules)
+                grid.Rows.Add(r.Enabled, RuleKinds.Display(r.Kind), r.Values, ToTargetLabel(r.Target));
+            loading = was;
+        }
+
+        void SaveRules()
+        {
+            if (loading) return;
+            var list = new List<Rule>();
+            foreach (DataGridViewRow row in grid.Rows)
+            {
+                list.Add(new Rule
+                {
+                    Enabled = row.Cells[0].Value is bool && (bool)row.Cells[0].Value,
+                    Kind = RuleKinds.FromDisplay(row.Cells[1].Value as string),
+                    Values = (row.Cells[2].Value as string) ?? "",
+                    Target = FromTargetLabel((row.Cells[3].Value as string) ?? DirectLabel),
+                });
+            }
+            P.Rules = list;
+            Save();
+        }
+
+        void AddRule(Rule r)
+        {
+            P.Rules.Add(r);
+            LoadRules();
+            Save();
+            if (grid.Rows.Count > 0) grid.CurrentCell = grid.Rows[grid.Rows.Count - 1].Cells[2];
+        }
+
+        void MoveRule(int d)
+        {
+            if (grid.CurrentRow == null) return;
+            int i = grid.CurrentRow.Index, j = i + d;
+            if (j < 0 || j >= P.Rules.Count) return;
+            var r = P.Rules[i]; P.Rules[i] = P.Rules[j]; P.Rules[j] = r;
+            LoadRules(); Save();
+            grid.CurrentCell = grid.Rows[j].Cells[2];
+        }
+
+        void LoadSettings()
+        {
+            tbSingBox.Text = P.SingBoxPath ?? "";
+            tbOpenVpn.Text = P.OpenVpnPath ?? "";
+            tbAwg.Text = P.AwgGoPath ?? "";
+            tbDns.Text = P.DefaultDns ?? "local";
+            tgStrict.SetSilently(P.StrictRoute);
+            cbLogLevel.SelectedItem = string.IsNullOrEmpty(P.LogLevel) ? "info" : P.LogLevel;
+        }
+
+        void SaveSettings()
+        {
+            P.SingBoxPath = tbSingBox.Text.Trim();
+            P.OpenVpnPath = tbOpenVpn.Text.Trim();
+            P.AwgGoPath = tbAwg.Text.Trim();
+            Save();
+        }
+
+        // ======================= действия с туннелями =======================
+        void AddLinks()
+        {
+            string text = Dialogs.MultiLine(this, I18n.L("Добавить по ссылке"), I18n.L("Вставьте одну или несколько ссылок (по одной на строку) или подписку в base64:\nvless://  vmess://  trojan://  ss://  hy2://  hysteria://  tuic://"));
+            if (string.IsNullOrWhiteSpace(text)) return;
+            text = text.Trim();
+            string dec;
+            if (!text.Contains("://") && LinkParser.TryB64(text, out dec) && dec.Contains("://")) text = dec;
+
+            int ok = 0;
+            var errors = new List<string>();
+            foreach (var raw in text.Split('\n'))
+            {
+                string line = raw.Trim();
+                if (line.Length == 0) continue;
+                try
+                {
+                    var pl = LinkParser.Parse(line);
+                    P.Tunnels.Add(new Tunnel { Name = P.UniqueName(pl.Name), Type = pl.Type, Link = line, Server = pl.Server });
+                    ok++;
+                }
+                catch (Exception ex) { errors.Add(ex.Message); }
+            }
+            Save(); LoadTunnels();
+            if (errors.Count > 0)
+                MessageBox.Show(this, I18n.L("Добавлено: ") + ok + I18n.L("\nНе удалось разобрать: ") + errors.Count + "\n\n" + string.Join("\n", errors.ToArray()), AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        void ImportOvpn()
+        {
+            using (var d = new OpenFileDialog { Filter = I18n.L("OpenVPN (*.ovpn;*.conf)|*.ovpn;*.conf|Все файлы|*.*") })
+            {
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    var t = new Tunnel { Type = TunnelTypes.OpenVpn, Name = P.UniqueName(Path.GetFileNameWithoutExtension(d.FileName)) };
+                    t.ConfigFile = OvpnConf.Import(d.FileName, t.Dir());
+                    string text = File.ReadAllText(t.ConfigPath());
+                    var remotes = OvpnConf.Remotes(text);
+                    t.Server = remotes.Count > 0 ? string.Join(", ", remotes.ToArray()) : "";
+                    if (OvpnConf.NeedsAuth(text))
+                    {
+                        string user = ""; string pass;
+                        if (Dialogs.Credentials(this, I18n.L("Логин для ") + t.Name, ref user, out pass)) { t.OvpnUser = user; t.OvpnPassProtected = Secret.Protect(pass); }
+                    }
+                    P.Tunnels.Add(t);
+                    Save(); LoadTunnels();
+                }
+                catch (Exception ex) { MessageBox.Show(this, I18n.L("Не удалось импортировать: ") + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            }
+        }
+
+        void ImportWg()
+        {
+            using (var d = new OpenFileDialog { Filter = I18n.L("WireGuard / AmneziaWG (*.conf)|*.conf|Все файлы|*.*") })
+            {
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                try
+                {
+                    string text = File.ReadAllText(d.FileName);
+                    var wg = WgConf.Parse(text);
+                    string host; int port;
+                    wg.Endpoint(0, out host, out port);
+                    var t = new Tunnel
+                    {
+                        Type = wg.IsAmnezia() ? TunnelTypes.AmneziaWg : TunnelTypes.WireGuard,
+                        Name = P.UniqueName(Path.GetFileNameWithoutExtension(d.FileName)),
+                        Server = host + ":" + port,
+                        ConfigFile = "tunnel.conf",
+                    };
+                    Directory.CreateDirectory(t.Dir());
+                    File.WriteAllText(t.ConfigPath(), text);
+                    P.Tunnels.Add(t);
+                    Save(); LoadTunnels();
+                }
+                catch (Exception ex) { MessageBox.Show(this, I18n.L("Не удалось импортировать: ") + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+            }
+        }
+
+        void RenameTunnel(Tunnel t)
+        {
+            string n = Dialogs.Input(this, I18n.L("Переименовать"), I18n.L("Новое имя туннеля:"), t.Name);
+            if (string.IsNullOrEmpty(n) || n == t.Name) return;
+            if (P.Find(n) != null || n == "direct" || n == "block" || n == DirectLabel || n == BlockLabel) { MessageBox.Show(this, I18n.L("Такое имя уже занято."), AppName); return; }
+            foreach (var r in P.Rules) if (r.Target == t.Name) r.Target = n;
+            if (P.Final == t.Name) P.Final = n;
+            if (P.RuleSetDetour == t.Name) P.RuleSetDetour = n;
+            if (P.KillTunnel == t.Name) P.KillTunnel = n;
+            t.Name = n;
+            Save(); LoadTunnels(); LoadRules();
+        }
+
+        void DeleteTunnel(Tunnel t)
+        {
+            if (MessageBox.Show(this, I18n.L("Удалить туннель «") + t.Name + I18n.L("»?\nПравила, которые на него ссылаются, будут пропускаться."), AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            P.Tunnels.Remove(t);
+            try { if (Directory.Exists(t.Dir())) Directory.Delete(t.Dir(), true); } catch { }
+            Save(); LoadTunnels(); LoadRules();
+        }
+
+        void SetOvpnCreds(Tunnel t)
+        {
+            string user = t.OvpnUser; string pass;
+            if (!Dialogs.Credentials(this, I18n.L("Логин для ") + t.Name, ref user, out pass)) return;
+            t.OvpnUser = user; t.OvpnPassProtected = Secret.Protect(pass);
+            Save();
+        }
+
+        void SetOvpnDriver(Tunnel t)
+        {
+            string v = Dialogs.Input(this, I18n.L("Драйвер OpenVPN"), I18n.L("native — встроенный в sing-box (по умолчанию).  dco / wintun / tap — через установленный openvpn.exe"), t.OvpnDriver ?? "native");
+            if (v == null) return;
+            v = v.ToLowerInvariant();
+            if (v != "native" && v != "dco" && v != "wintun" && v != "tap") { MessageBox.Show(this, I18n.L("Допустимо: native, dco, wintun, tap"), AppName); return; }
+            t.OvpnDriver = v; Save(); LoadTunnels();
+        }
+
+        void SetTunnelDns(Tunnel t)
+        {
+            string v = Dialogs.Input(this, I18n.L("DNS внутри туннеля"), I18n.L("DNS для доменов, которые идут через «") + t.Name + I18n.L("» (пусто — автоматически):"), t.DnsServer);
+            if (v == null) return;
+            t.DnsServer = v; Save();
+        }
+
+        // ======================= подключение =======================
+        void Connect()
+        {
+            SaveRules();
+            if (AppPaths.SingBox(P) == null)
+            {
+                MessageBox.Show(this, I18n.L("Не найден sing-box.exe.\nПоложите его в папку:\n") + AppPaths.CoresDir, AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            statuses.Clear();
+            engine.Start(P);
+        }
+
+        void OnState(string st)
+        {
+            string prev = state;
+            state = st;
+            power.State = st;
+            power.Invalidate();
+            bool on = st == "connected";
+            sideStatus.Text = on ? I18n.L("Защищено") : st == "connecting" ? I18n.L("Подключение…") : st == "stopping" ? I18n.L("Отключение…") : I18n.L("Не подключено");
+            sideDotColor = on ? Theme.Good : st == "stopped" ? (engine.KillActive ? Theme.Warn : Theme.Muted) : Theme.Warn;
+            sideDot.Invalidate();
+            tray.Text = AppName + I18n.L(" — ") + sideStatus.Text;
+            tray.Icon = MakeIcon(on);
+            if (prev == "connected" && st == "stopped" && engine.KillActive)
+                tray.ShowBalloonTip(5000, AppName, I18n.L("VPN упал. Kill switch не выпускает защищённые программы в интернет без VPN."), ToolTipIcon.Warning);
+            RefreshHome();
+            RefreshKill();
+        }
+
+        void PreviewConfig()
+        {
+            try
+            {
+                SaveRules();
+                BuildResult res;
+                string path = Engine.WriteConfig(P, false, out res);
+                foreach (var w in res.Warnings) AppendLog("! " + w);
+                Process.Start("notepad.exe", "\"" + path + "\"");
+            }
+            catch (Exception ex) { MessageBox.Show(this, ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+        }
+
+        void OnClosing(object sender, FormClosingEventArgs e)
+        {
+            if (engine.State != "stopped")
+            {
+                if (MessageBox.Show(this, I18n.L("Отключить все туннели и выйти?"), AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) { e.Cancel = true; return; }
+                Cursor = Cursors.WaitCursor;
+                engine.StopBlocking();
+            }
+            tray.Visible = false;
+            tray.Dispose();
+        }
+    }
+}

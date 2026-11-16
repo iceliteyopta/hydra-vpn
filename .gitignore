@@ -1,0 +1,9 @@
+# Build output
+*.exe
+*.pdb
+
+# Cores are downloaded separately (see get-singbox.ps1)
+cores/
+
+# User data: tunnels, keys, passwords, generated configs
+data/
