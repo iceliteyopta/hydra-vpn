@@ -35,6 +35,7 @@ namespace Hydra
             new[] { "ip_cidr", I18n.L("IP / подсеть") },
             new[] { "geoip", I18n.L("Страна geoip") },
             new[] { "process_name", I18n.L("Программа (.exe)") },
+            new[] { "process_folder", I18n.L("Папка программ") },
             new[] { "port", I18n.L("Порт") },
         };
 
@@ -174,7 +175,9 @@ namespace Hydra
             {
                 n++;
                 if (!r.Enabled) continue;
-                var vals = SplitValues(r.Values);
+                // В именах программ и папках бывают пробелы — делим только по запятой/; /переводу строки
+                bool keepSpaces = r.Kind == "process_name" || r.Kind == "process_folder";
+                var vals = keepSpaces ? SplitList(r.Values) : SplitValues(r.Values);
                 if (vals.Count == 0) continue;
                 string target = r.Target ?? "direct";
                 if (target != "direct" && target != "block" && !tags.Contains(target))
@@ -289,6 +292,14 @@ namespace Hydra
                 case "process_name":
                     foreach (var v in vals) list.Add(v.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? v : v + ".exe");
                     return D.New("process_name", list);
+                case "process_folder":
+                    // Всё, что запущено из этих папок (и подпапок): регулярка по полному пути процесса
+                    foreach (var v in vals)
+                    {
+                        string dir = Environment.ExpandEnvironmentVariables(v.Trim().Trim('"')).TrimEnd('\\', '/');
+                        list.Add("(?i)^" + GoRegexEscape(dir) + "\\\\");
+                    }
+                    return D.New("process_path_regex", list);
                 case "port":
                     foreach (var v in vals)
                     {
@@ -378,6 +389,27 @@ namespace Hydra
             IPAddress ip;
             if (!IPAddress.TryParse(host, out ip)) s["domain_resolver"] = "dns-local";
             return s;
+        }
+
+        // Экранирование для RE2 (Go): только спецсимволы, пробелы оставляем как есть
+        static string GoRegexEscape(string s)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (char c in s)
+            {
+                if ("\\.+*?()|[]{}^$".IndexOf(c) >= 0) sb.Append('\\');
+                sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        public static List<string> SplitList(string s)
+        {
+            var l = new List<string>();
+            if (string.IsNullOrEmpty(s)) return l;
+            foreach (var p in s.Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+                if (p.Trim().Length > 0) l.Add(p.Trim());
+            return l;
         }
 
         public static List<string> SplitValues(string s)

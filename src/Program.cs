@@ -66,7 +66,7 @@ namespace Hydra
                 catch (Exception ex) { File.WriteAllText(args[1], "FAIL " + ex); return 1; }
             }
             // Импорт без окна: --add-link <ссылка> <имя> | --add-ovpn <файл> <имя> | --add-rule <тип> <значения> <куда> | --set-final <куда>
-            if (args.Length >= 2 && (args[0] == "--add-link" || args[0] == "--add-ovpn" || args[0] == "--add-rule" || args[0] == "--set-final" || args[0] == "--set-dns" || args[0] == "--set-ruleset-via" || args[0] == "--set-killswitch"))
+            if (args.Length >= 2 && (args[0] == "--add-link" || args[0] == "--add-ovpn" || args[0] == "--add-rule" || args[0] == "--add-rule-top" || args[0] == "--set-final" || args[0] == "--set-dns" || args[0] == "--set-ruleset-via" || args[0] == "--set-killswitch"))
             {
                 var st = ProfileStore.Load();
                 var p = st.Profile;
@@ -96,6 +96,10 @@ namespace Hydra
                         case "--add-rule":
                             p.Rules.Add(new Rule { Kind = args[1], Values = args[2], Target = args[3] });
                             res = "OK rule " + args[1] + " -> " + args[3];
+                            break;
+                        case "--add-rule-top":
+                            p.Rules.Insert(0, new Rule { Kind = args[1], Values = args[2], Target = args[3] });
+                            res = "OK rule (top) " + args[1] + " -> " + args[3];
                             break;
                         case "--set-dns":
                             p.DefaultDns = args[1];

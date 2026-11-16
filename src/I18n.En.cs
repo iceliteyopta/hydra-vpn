@@ -169,6 +169,7 @@ namespace Hydra
             T("IP / подсеть", "IP / subnet");
             T("Страна geoip", "geoip country");
             T("Программа (.exe)", "App (.exe)");
+            T("Папка программ", "App folder");
             T("Порт", "Port");
             // --- сборка конфига ---
             T("не удалось определить IP сервера ", "could not resolve server IP ");
