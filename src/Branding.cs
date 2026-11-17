@@ -60,6 +60,37 @@ namespace Hydra
         }
 
         [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr h);
+        [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern void SHChangeNotify(int eventId, int flags, string item1, IntPtr item2);
+
+        static Icon bigIcon, smallIcon;
+
+        // Явно ставим окну большой (панель задач, Alt+Tab) и маленький (заголовок) значки нужного под DPI размера
+        public static void SetWindowIcons(IntPtr hwnd)
+        {
+            try
+            {
+                int big = Math.Max(32, GetSystemMetrics(11));   // SM_CXICON
+                int small = Math.Max(16, GetSystemMetrics(49)); // SM_CXSMICON
+                if (bigIcon == null) bigIcon = MakeIcon(big, "brand");
+                if (smallIcon == null) smallIcon = MakeIcon(small, "brand");
+                SendMessage(hwnd, 0x0080, (IntPtr)1, bigIcon.Handle);   // WM_SETICON, ICON_BIG
+                SendMessage(hwnd, 0x0080, (IntPtr)0, smallIcon.Handle); // WM_SETICON, ICON_SMALL
+            }
+            catch { }
+        }
+
+        // Windows кэширует значок exe по пути; после обновления на месте просим оболочку перечитать его
+        public static void RefreshShellIcon(string exePath)
+        {
+            try
+            {
+                SHChangeNotify(0x00002000, 0x0005, exePath, IntPtr.Zero); // SHCNE_UPDATEITEM, SHCNF_PATHW
+                SHChangeNotify(0x08000000, 0x0000, null, IntPtr.Zero);    // SHCNE_ASSOCCHANGED
+            }
+            catch { }
+        }
 
         public static Icon MakeIcon(int size, string state)
         {

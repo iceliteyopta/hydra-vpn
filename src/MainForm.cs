@@ -118,7 +118,14 @@ namespace Hydra
             OnState("stopped");
             ShowPage("home");
 
-            HandleCreated += (s, e) => Theme.DarkTitleBar(this);
+            HandleCreated += (s, e) => { Theme.DarkTitleBar(this); Branding.SetWindowIcons(Handle); };
+            // Первый запуск новой версии: просим Windows перечитать значок exe (иначе на панели задач — старый из кэша)
+            if (P.LastRunVersion != Updater.CurrentVersion)
+            {
+                Branding.RefreshShellIcon(Application.ExecutablePath);
+                P.LastRunVersion = Updater.CurrentVersion;
+                Save();
+            }
             Shown += (s, e) => engine.SyncKillState();
 
             // Нет ядра — скачиваем сами сразу после открытия окна

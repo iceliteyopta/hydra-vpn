@@ -13,7 +13,7 @@ namespace Hydra
     public static class Updater
     {
         public const string Repo = "iceliteyopta/hydra-vpn";
-        public const string CurrentVersion = "2.4.0";
+        public const string CurrentVersion = "2.4.1";
 
         public class Release
         {
@@ -98,6 +98,7 @@ namespace Hydra
             if (File.Exists(old)) File.Delete(old);
             File.Move(self, old);
             File.Move(tmp, self);
+            Branding.RefreshShellIcon(self);
             return self;
         }
 

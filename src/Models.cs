@@ -80,6 +80,8 @@ namespace Hydra
         public string SkippedVersion { get; set; }
         // Уведомления Windows о сбоях
         public bool NotifyFailures { get; set; }
+        // Версия, запускавшаяся в прошлый раз (после обновления обновляем значок в кэше Windows)
+        public string LastRunVersion { get; set; }
 
         public Profile()
         {
