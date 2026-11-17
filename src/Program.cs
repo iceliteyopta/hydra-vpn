@@ -45,7 +45,7 @@ namespace Hydra
                 f.ShowInTaskbar = false;
                 f.Shown += (s, e) =>
                 {
-                    foreach (var page in new[] { "home", "tunnels", "rules", "protect", "settings" })
+                    foreach (var page in new[] { "home", "tunnels", "rules", "protect", "settings", "history" })
                     {
                         f.ShowPageForTest(page);
                         Application.DoEvents();
@@ -173,9 +173,28 @@ namespace Hydra
                     Updater.CleanupOld();
                 }
                 if (!created) { MessageBox.Show(I18n.L("Hydra уже запущена (иконка в трее)."), "Hydra"); return 0; }
+
+                // Сбои: в UI-потоке — отчёт и продолжаем работу; в других потоках — отчёт перед падением
+                Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+                Application.ThreadException += (s, e) =>
+                {
+                    string path = CrashReport.ForException(e.Exception, "UI");
+                    MessageBox.Show(I18n.L("В Hydra произошла ошибка, но работа продолжится.\n\n") + e.Exception.Message +
+                        (path != null ? I18n.L("\n\nОтчёт сохранён:\n") + path : ""), "Hydra", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                };
+                AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+                {
+                    var ex = e.ExceptionObject as Exception;
+                    if (ex != null) CrashReport.ForException(ex, I18n.L("фоновый поток"));
+                    FileLog.Close();
+                };
+
+                History.MarkStarted();
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.Run(new MainForm());
+                History.MarkExited();
+                FileLog.Close();
             }
             return 0;
         }

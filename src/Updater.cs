@@ -13,7 +13,7 @@ namespace Hydra
     public static class Updater
     {
         public const string Repo = "iceliteyopta/hydra-vpn";
-        public const string CurrentVersion = "2.2.0";
+        public const string CurrentVersion = "2.3.0";
 
         public class Release
         {

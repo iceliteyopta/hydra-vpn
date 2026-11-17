@@ -24,10 +24,17 @@ namespace Hydra
 
         void SetKill(bool v) { KillActive = v; var h = KillChanged; if (h != null) h(v); }
 
+        // для истории: начало сессии и последние строки sing-box
+        DateTime sessionStart;
+        bool sessionActive;
+        readonly Queue<string> singboxTail = new Queue<string>();
+
+        long SessionSeconds() { return sessionActive ? (long)(DateTime.Now - sessionStart).TotalSeconds : 0; }
+
         // Снять блокировку kill switch вручную (когда VPN уже не работает)
         public void ReleaseKill()
         {
-            var th = new Thread(() => { KillSwitch.Disable(L); SetKill(false); });
+            var th = new Thread(() => { KillSwitch.Disable(L); SetKill(false); History.Add(History.KillRelease, I18n.L("Блокировка kill switch снята вручную")); });
             th.IsBackground = true;
             th.Start();
         }
@@ -57,7 +64,12 @@ namespace Hydra
                     DoStart(p);
                     lock (sync) { if (State == "connecting") SetState("connected"); }
                 }
-                catch (Exception ex) { L(I18n.L("ОШИБКА: ") + ex.Message); DoStop(false); }
+                catch (Exception ex)
+                {
+                    L(I18n.L("ОШИБКА: ") + ex.Message);
+                    History.Add(History.Error, I18n.L("Не удалось подключиться"), ex.Message);
+                    DoStop(false);
+                }
             });
             th.IsBackground = true;
             th.Start();
@@ -108,17 +120,30 @@ namespace Hydra
 
             L(I18n.L("Запускаю sing-box (TUN «") + ConfigBuilder.TunName + I18n.L("»)…"));
             var started = new ManualResetEvent(false);
+            lock (singboxTail) singboxTail.Clear();
             singbox = Proc.Start(sb, "run -c \"" + cfg + "\" -D \"" + AppPaths.RunDir.TrimEnd('\\') + "\" --disable-color", AppPaths.RunDir, line =>
             {
                 L("[sing-box] " + line);
+                lock (singboxTail) { singboxTail.Enqueue(line); while (singboxTail.Count > 80) singboxTail.Dequeue(); }
                 if (line.Contains("sing-box started")) started.Set();
             }, null);
+            var proc = singbox;
             singbox.Exited += (s, e) =>
             {
                 started.Set();
                 if (State == "connected")
                 {
+                    int exitCode = -1;
+                    try { exitCode = proc.ExitCode; } catch { }
                     L(I18n.L("sing-box неожиданно завершился"));
+                    string tail;
+                    lock (singboxTail) tail = string.Join(Environment.NewLine, singboxTail.ToArray());
+                    string lastErr = "";
+                    foreach (var l in tail.Split('\n')) if (l.Contains("FATAL") || l.Contains("ERROR") || l.Contains("panic")) lastErr = l.Trim();
+                    string report = CrashReport.Write(I18n.L("обрыв VPN: sing-box завершился с кодом ") + exitCode, tail);
+                    History.Add(History.Dropped, I18n.L("VPN оборвался: sing-box завершился с кодом ") + exitCode,
+                        lastErr.Length > 0 ? lastErr : null, SessionSeconds(), report);
+                    sessionActive = false;
                     DoStop(true);
                 }
             };
@@ -153,9 +178,15 @@ namespace Hydra
                 {
                     Status(r.Name, I18n.L("ошибка"));
                     L(I18n.L("Туннель «") + r.Name + I18n.L("»: ") + ex.Message);
+                    History.Add(History.TunnelError, I18n.L("Туннель «") + r.Name + I18n.L("» не поднялся"), ex.Message);
                 }
             }
             L(I18n.L("Готово. Трафик распределяется по правилам."));
+            var names = new List<string>();
+            foreach (var t in p.Tunnels) if (t.Enabled) names.Add(t.Name);
+            sessionStart = DateTime.Now;
+            sessionActive = true;
+            History.Add(History.Connected, I18n.L("VPN подключён"), string.Join(", ", names.ToArray()) + (KillActive ? "  ·  kill switch" : ""));
         }
 
         // keepKill = true: VPN упал сам — блокировку kill switch оставляем
@@ -180,9 +211,16 @@ namespace Hydra
             }
             if (KillActive)
             {
-                if (keepKill) L(I18n.L("Kill switch держит блокировку: защищённые программы не выйдут в интернет, пока VPN не поднимется или вы не снимете блокировку."));
+                if (keepKill)
+                {
+                    L(I18n.L("Kill switch держит блокировку: защищённые программы не выйдут в интернет, пока VPN не поднимется или вы не снимете блокировку."));
+                    History.Add(History.KillHold, I18n.L("Kill switch заблокировал защищённые программы"));
+                }
                 else { KillSwitch.Disable(L); SetKill(false); }
             }
+            if (!keepKill && sessionActive)
+                History.Add(History.Disconnected, I18n.L("VPN отключён"), null, SessionSeconds());
+            sessionActive = false;
             L(I18n.L("Отключено."));
             SetState("stopped");
         }

@@ -105,7 +105,8 @@ namespace Hydra
             LoadSettings();
             loading = false;
 
-            engine.Log += s => Ui(() => AppendLog(s));
+            engine.Log += s => { FileLog.Write(s); Ui(() => AppendLogUi(s)); };
+            History.Added += ev => Ui(() => { if (pages.ContainsKey("history") && pages["history"].Visible) RefreshHistory(); });
             engine.TunnelStatus += (n, st) => Ui(() => { statuses[n] = st; RefreshStatuses(); });
             engine.StateChanged += st => Ui(() => OnState(st));
             engine.KillChanged += on => Ui(RefreshKill);
@@ -177,6 +178,7 @@ namespace Hydra
                     Ui(() =>
                     {
                         AppendLog(I18n.L("Hydra обновлена до ") + r.Version + I18n.L(", перезапуск…"));
+                        History.Add(History.Update, I18n.L("Hydra обновлена до ") + r.Version, Updater.CurrentVersion + " → " + r.Version);
                         if (engine.State != "stopped") engine.StopBlocking();
                         tray.Visible = false;
                         Updater.Restart(exe);
@@ -298,6 +300,7 @@ namespace Hydra
             AddNav(nav, "rules", I18n.L("Правила"), Theme.IcList);
             AddNav(nav, "protect", I18n.L("Защита"), Theme.IcShield);
             AddNav(nav, "settings", I18n.L("Настройки"), Theme.IcSettings);
+            AddNav(nav, "history", I18n.L("История"), "");
             AddNav(nav, "log", I18n.L("Журнал"), Theme.IcLog);
 
             var bottom = new Panel { Dock = DockStyle.Bottom, Height = 64, BackColor = Theme.Sidebar };
@@ -322,6 +325,7 @@ namespace Hydra
             pages["rules"] = BuildRules();
             pages["protect"] = BuildProtect();
             pages["settings"] = BuildSettings();
+            pages["history"] = BuildHistory();
             pages["log"] = BuildLog();
             foreach (var p in pages.Values) { p.Visible = false; content.Controls.Add(p); }
             Theme.Apply(content);
@@ -356,6 +360,7 @@ namespace Hydra
             foreach (var kv in navs) kv.Value.Active = kv.Key == key;
             if (key == "home") RefreshHome();
             if (key == "protect") RefreshKill();
+            if (key == "history") RefreshHistory();
         }
 
         public void ShowPageForTest(string key) { ShowPage(key); }
@@ -974,10 +979,165 @@ namespace Hydra
             return Page(I18n.L("Журнал"), I18n.L("Что происходит внутри: sing-box, туннели, kill switch"), Toolbar(copy, clear), card);
         }
 
+        // Сообщения самого окна: и в журнал на диске, и на экран
         void AppendLog(string s)
+        {
+            FileLog.Write(s);
+            AppendLogUi(s);
+        }
+
+        void AppendLogUi(string s)
         {
             if (txtLog.TextLength > 400000) txtLog.Text = txtLog.Text.Substring(200000);
             txtLog.AppendText(s + Environment.NewLine);
+        }
+
+        // ======================= история =======================
+        ListBox lbHistory;
+        DarkCombo cbHistFilter;
+        Label statSessions, statDrops, statOnline;
+        List<HistoryEvent> historyAll = new List<HistoryEvent>();
+
+        Control BuildHistory()
+        {
+            cbHistFilter = new DarkCombo { Width = 230, Margin = new Padding(0, 2, 8, 8) };
+            cbHistFilter.Items.AddRange(new object[] { I18n.L("Все события"), I18n.L("Подключения и отключения"), I18n.L("Обрывы и ошибки"), I18n.L("Сбои Hydra") });
+            cbHistFilter.SelectedIndex = 0;
+            cbHistFilter.SelectedIndexChanged += (s, e) => FillHistory();
+            var openLogs = new FlatButton(I18n.L("Папка логов"), Theme.IcFolder, ButtonKind.Secondary);
+            openLogs.Click += (s, e) => { Directory.CreateDirectory(FileLog.Dir); Process.Start("explorer.exe", "\"" + FileLog.Dir + "\""); };
+            var today = new FlatButton(I18n.L("Журнал за сегодня"), Theme.IcFile, ButtonKind.Secondary);
+            today.Click += (s, e) => OpenFile(FileLog.PathFor(DateTime.Now));
+            var clear = new FlatButton(I18n.L("Очистить историю"), Theme.IcDelete, ButtonKind.Danger);
+            clear.Click += (s, e) =>
+            {
+                if (MessageBox.Show(this, I18n.L("Очистить историю событий? Журналы и отчёты о сбоях останутся в папке логов."), AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+                History.Clear(); RefreshHistory();
+            };
+
+            var stats = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 92, BackColor = Theme.Bg, WrapContents = false };
+            statSessions = StatCard(stats, I18n.L("подключений за 7 дней"), Theme.Accent);
+            statDrops = StatCard(stats, I18n.L("обрывов и ошибок за 7 дней"), Theme.Warn);
+            statOnline = StatCard(stats, I18n.L("под VPN сегодня"), Theme.Good);
+
+            lbHistory = new ListBox { Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = Theme.Surface, ForeColor = Theme.Text, DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = 58, IntegralHeight = false };
+            lbHistory.DrawItem += DrawHistoryItem;
+            lbHistory.DoubleClick += (s, e) =>
+            {
+                var ev = lbHistory.SelectedItem as HistoryEvent;
+                if (ev == null) return;
+                if (!string.IsNullOrEmpty(ev.File) && File.Exists(ev.File)) OpenFile(ev.File);
+                else OpenFile(FileLog.PathFor(ev.When()));
+            };
+            var card = new Card { Padding = new Padding(8) };
+            card.Controls.Add(lbHistory);
+
+            var body = new Panel { BackColor = Theme.Bg };
+            card.Dock = DockStyle.Fill;
+            body.Controls.Add(card);
+            body.Controls.Add(stats);
+            return Page(I18n.L("История"), I18n.L("Подключения, обрывы и сбои. Двойной клик — отчёт или журнал за тот день"), Toolbar(cbHistFilter, openLogs, today, clear), body);
+        }
+
+        Label StatCard(FlowLayoutPanel parent, string caption, Color accent)
+        {
+            var c = new Card { Width = 250, Height = 76, Margin = new Padding(0, 0, 12, 0), Padding = new Padding(0) };
+            var value = new Label { Text = "—", Font = Theme.UiBold(18f), ForeColor = accent, AutoSize = true, Location = new Point(18, 10), BackColor = Color.Transparent };
+            c.Controls.Add(value);
+            c.Controls.Add(new Label { Text = caption, Font = Theme.Ui(9f), ForeColor = Theme.Muted, AutoSize = true, Location = new Point(20, 46), BackColor = Color.Transparent });
+            parent.Controls.Add(c);
+            return value;
+        }
+
+        void RefreshHistory()
+        {
+            historyAll = History.Load();
+            DateTime weekAgo = DateTime.Now.AddDays(-7), today = DateTime.Today;
+            int sessions = 0, drops = 0; long online = 0;
+            foreach (var e in historyAll)
+            {
+                var t = e.When();
+                if (t >= weekAgo)
+                {
+                    if (e.Kind == History.Connected) sessions++;
+                    if (e.Kind == History.Dropped || e.Kind == History.Error || e.Kind == History.TunnelError || e.Kind == History.Crash) drops++;
+                }
+                if (t >= today && (e.Kind == History.Disconnected || e.Kind == History.Dropped)) online += e.Duration;
+            }
+            if (state == "connected")
+                foreach (var e in historyAll)
+                    if (e.Kind == History.Connected) { var t = e.When(); online += (long)(DateTime.Now - (t > today ? t : today)).TotalSeconds; break; }
+            statSessions.Text = sessions.ToString();
+            statDrops.Text = drops.ToString();
+            statOnline.Text = online > 0 ? History.FormatDuration(online) : "0";
+            FillHistory();
+        }
+
+        void FillHistory()
+        {
+            if (lbHistory == null) return;
+            int f = cbHistFilter.SelectedIndex;
+            lbHistory.BeginUpdate();
+            lbHistory.Items.Clear();
+            foreach (var e in historyAll)
+            {
+                bool show = f == 0
+                    || f == 1 && (e.Kind == History.Connected || e.Kind == History.Disconnected || e.Kind == History.Dropped)
+                    || f == 2 && (e.Kind == History.Dropped || e.Kind == History.Error || e.Kind == History.TunnelError || e.Kind == History.KillHold)
+                    || f == 3 && e.Kind == History.Crash;
+                if (show) lbHistory.Items.Add(e);
+            }
+            if (lbHistory.Items.Count == 0) lbHistory.Items.Add(I18n.L("Событий пока нет"));
+            lbHistory.EndUpdate();
+        }
+
+        static Color KindColor(string k)
+        {
+            if (k == History.Connected) return Theme.Good;
+            if (k == History.Disconnected || k == History.KillRelease) return Theme.Accent;
+            if (k == History.Dropped || k == History.KillHold) return Theme.Warn;
+            if (k == History.Error || k == History.TunnelError || k == History.Crash) return Theme.Bad;
+            if (k == History.Update) return Theme.Accent2;
+            return Theme.Muted;
+        }
+
+        void DrawHistoryItem(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+            var g = e.Graphics; Theme.Hq(g);
+            bool sel = (e.State & DrawItemState.Selected) != 0;
+            using (var br = new SolidBrush(sel ? Theme.Mix(Theme.Surface, Theme.Accent, 0.12f) : Theme.Surface)) g.FillRectangle(br, e.Bounds);
+            using (var pen = new Pen(Theme.Border)) g.DrawLine(pen, e.Bounds.X + 12, e.Bounds.Bottom - 1, e.Bounds.Right - 12, e.Bounds.Bottom - 1);
+            var ev = lbHistory.Items[e.Index] as HistoryEvent;
+            if (ev == null)
+            {
+                using (var br = new SolidBrush(Theme.Muted)) g.DrawString(Convert.ToString(lbHistory.Items[e.Index]), Theme.Ui(9.5f), br, e.Bounds.X + 16, e.Bounds.Y + 18);
+                return;
+            }
+            Color c = KindColor(ev.Kind);
+            float cy = e.Bounds.Y + e.Bounds.Height / 2f;
+            using (var br = new SolidBrush(Theme.Alpha(c, 50))) g.FillEllipse(br, e.Bounds.X + 14, cy - 9, 18, 18);
+            using (var br = new SolidBrush(c)) g.FillEllipse(br, e.Bounds.X + 19, cy - 4, 8, 8);
+
+            var t = ev.When();
+            string when = t.Date == DateTime.Today ? t.ToString("HH:mm:ss") : t.ToString("dd.MM HH:mm");
+            using (var f = Theme.UiSemi(10f)) using (var br = new SolidBrush(Theme.Text))
+                g.DrawString(ev.Text ?? "", f, br, new RectangleF(e.Bounds.X + 44, e.Bounds.Y + 8, e.Bounds.Width - 200, 22), new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
+            using (var f = Theme.Ui(9f)) using (var br = new SolidBrush(Theme.Muted))
+                g.DrawString(when, f, br, new RectangleF(e.Bounds.Right - 150, e.Bounds.Y + 10, 136, 18), new StringFormat { Alignment = StringAlignment.Far });
+
+            var sub = new List<string>();
+            if (ev.Duration > 0) sub.Add(I18n.L("длительность ") + History.FormatDuration(ev.Duration));
+            if (!string.IsNullOrEmpty(ev.Details)) sub.Add(ev.Details);
+            if (!string.IsNullOrEmpty(ev.File)) sub.Add(I18n.L("есть отчёт"));
+            using (var f = Theme.Ui(8.5f)) using (var br = new SolidBrush(Theme.Muted))
+                g.DrawString(string.Join("   ·   ", sub.ToArray()), f, br, new RectangleF(e.Bounds.X + 44, e.Bounds.Y + 32, e.Bounds.Width - 60, 18), new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
+        }
+
+        void OpenFile(string path)
+        {
+            if (File.Exists(path)) { try { Process.Start("notepad.exe", "\"" + path + "\""); } catch { } }
+            else MessageBox.Show(this, I18n.L("Файл не найден: ") + path, AppName);
         }
 
         // ======================= данные =======================
