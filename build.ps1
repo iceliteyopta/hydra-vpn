@@ -8,7 +8,11 @@ if (-not (Test-Path $csc)) { throw "csc.exe not found: $csc" }
 $src = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
 $out = if ($Out) { $Out } else { Join-Path $root 'Hydra.exe' }
 
-& $csc /nologo /target:winexe /optimize+ /codepage:65001 /nowarn:1607 `
+# Значок приложения (генерируется: Hydra.exe --make-icon src\hydra.ico)
+$icon = Join-Path $root 'src\hydra.ico'
+$iconArg = if (Test-Path $icon) { "/win32icon:$icon" } else { "/nologo" }
+
+& $csc /nologo /target:winexe /optimize+ /codepage:65001 /nowarn:1607 $iconArg `
     "/out:$out" "/win32manifest:$(Join-Path $root 'src\app.manifest')" `
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
     /r:System.Web.Extensions.dll /r:System.Security.dll `

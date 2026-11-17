@@ -78,10 +78,13 @@ namespace Hydra
         // Обновления с GitHub
         public bool CheckUpdates { get; set; }
         public string SkippedVersion { get; set; }
+        // Уведомления Windows о сбоях
+        public bool NotifyFailures { get; set; }
 
         public Profile()
         {
             CheckUpdates = true;
+            NotifyFailures = true;
             SkippedVersion = "";
             KillApps = new List<string>(Hydra.KillSwitch.DefaultApps);
             KillDomains = Hydra.KillSwitch.DefaultDomains;

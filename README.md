@@ -16,6 +16,10 @@
 - **Split DNS.** Domains routed into a tunnel are resolved through that tunnel; direct domains use the system resolver.
 - **Presets.** One-click rules for YouTube, Telegram, Discord, Meta, X, AI services, Russian sites, ads.
 - **Dark, modern UI.** English and Russian.
+- **Live speed per tunnel.** The Home page shows ↓/↑ for every tunnel and for direct traffic, with a one-minute graph.
+- **History, logs and crash reports.** Connects, disconnects, VPN drops, tunnel failures and crashes, with logs kept on disk for 14 days.
+- **Notifications and tray.** Windows notifications when something fails. Closing the window keeps Hydra running in the tray, and the tray menu shows status and speed.
+- **Self-updating.** Hydra checks GitHub for new releases and updates itself in one click, verifying the file by SHA-256.
 - **Tiny and dependency-free.** A ~170 KB executable built with the compiler that ships with Windows. No .NET SDK, no installers.
 
 | Tunnels | Rules | Kill switch |

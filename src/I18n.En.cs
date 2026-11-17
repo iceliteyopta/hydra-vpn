@@ -304,6 +304,19 @@ namespace Hydra
             T("В Hydra произошла ошибка, но работа продолжится.\n\n", "Hydra hit an error but will keep running.\n\n");
             T("\n\nОтчёт сохранён:\n", "\n\nReport saved:\n");
             T("фоновый поток", "background thread");
+            // --- скорость, трей, уведомления ---
+            T(" Б/с", " B/s");
+            T(" КБ/с", " KB/s");
+            T(" МБ/с", " MB/s");
+            T("без VPN", "no VPN");
+            T("» не отвечает", "” is not responding");
+            T("VPN оборвался", "VPN dropped");
+            T("\nKill switch держит защищённые программы офлайн.", "\nThe kill switch is keeping protected apps offline.");
+            T("Kill switch сработал", "Kill switch engaged");
+            T("Защищённые программы отрезаны от интернета, пока VPN не поднимется.", "Protected apps are cut off from the internet until the VPN is back.");
+            T("Hydra работает в трее. Выход — правой кнопкой по значку → «Выход».", "Hydra keeps running in the tray. To quit, right-click the icon → Exit.");
+            T("Уведомления о сбоях", "Failure notifications");
+            T("Всплывающие уведомления Windows: обрыв VPN, туннель не отвечает, ошибка подключения, kill switch, сбой Hydra", "Windows notifications: VPN drop, unresponsive tunnel, connection error, kill switch, Hydra crash");
             // --- Program ---
             T("Для работы VPN нужны права администратора.", "Hydra needs administrator rights to run the VPN.");
             T("Hydra уже запущена (иконка в трее).", "Hydra is already running (see the tray icon).");

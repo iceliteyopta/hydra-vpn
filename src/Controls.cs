@@ -229,21 +229,60 @@ namespace Hydra
     // Большая кнопка питания на главной
     public class PowerButton : PaintControl
     {
-        public string State = "stopped";
-        float phase;
-        bool hover;
-        readonly Timer anim = new Timer { Interval = 30 };
+        string state = "stopped";
+        bool hover, down;
+        // плавные значения 0..1, догоняют цель с экспоненциальным сглаживанием
+        float onT, busyT, hoverT, downT;
+        float phase, arcLen = 110f;
+        readonly Timer anim = new Timer { Interval = 15 };
+        readonly System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        double lastT;
 
         public PowerButton()
         {
             Size = new Size(230, 230);
             Cursor = Cursors.Hand;
-            anim.Tick += (s, e) => { phase += 0.06f; Invalidate(); };
+            anim.Tick += (s, e) => Step();
             anim.Start();
         }
 
-        protected override void OnMouseEnter(EventArgs e) { hover = true; base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { hover = false; base.OnMouseLeave(e); }
+        public string State
+        {
+            get { return state; }
+            set { state = value; Kick(); }
+        }
+
+        void Kick() { lastT = clock.Elapsed.TotalSeconds; if (!anim.Enabled) anim.Start(); }
+
+        static float Approach(float v, float target, float dt, float speed)
+        {
+            return v + (target - v) * (float)(1 - Math.Exp(-speed * dt));
+        }
+
+        void Step()
+        {
+            double now = clock.Elapsed.TotalSeconds;
+            float dt = (float)Math.Min(0.05, Math.Max(0.001, now - lastT));
+            lastT = now;
+            bool on = state == "connected", busy = state == "connecting" || state == "stopping";
+            onT = Approach(onT, on ? 1 : 0, dt, 5f);
+            busyT = Approach(busyT, busy ? 1 : 0, dt, 6f);
+            hoverT = Approach(hoverT, hover ? 1 : 0, dt, 10f);
+            downT = Approach(downT, down ? 1 : 0, dt, 18f);
+            phase += dt;
+            // дуга «дышит»: длина плавно меняется, пока идёт подключение
+            arcLen = 110f + 70f * (float)Math.Sin(phase * 2.2);
+            Invalidate();
+            bool settled = Math.Abs(onT - (on ? 1 : 0)) < 0.002f && Math.Abs(busyT - (busy ? 1 : 0)) < 0.002f
+                && Math.Abs(hoverT - (hover ? 1 : 0)) < 0.002f && Math.Abs(downT - (down ? 1 : 0)) < 0.002f;
+            // в покое (не подключено, не наведено) — таймер стоит, процессор отдыхает
+            if (settled && !on && !busy) anim.Stop();
+        }
+
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Kick(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; down = false; Kick(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(MouseEventArgs e) { down = true; Kick(); base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { down = false; Kick(); base.OnMouseUp(e); }
 
         protected override void Dispose(bool disposing) { if (disposing) anim.Dispose(); base.Dispose(disposing); }
 
@@ -251,60 +290,71 @@ namespace Hydra
         {
             var g = e.Graphics; Theme.Hq(g);
             float cx = Width / 2f, cy = Height / 2f;
-            float R = Math.Min(Width, Height) / 2f - 18;
-            bool on = State == "connected", busy = State == "connecting" || State == "stopping";
-            float pulse = (float)(Math.Sin(phase) * 0.5 + 0.5);
+            float scale = 1f - 0.035f * downT;
+            float R = (Math.Min(Width, Height) / 2f - 20) * scale;
+            float pulse = (float)(Math.Sin(phase * 2.0) * 0.5 + 0.5);
+            Color accent = Theme.Mix(Theme.Accent, Theme.Accent2, busyT * (1 - onT));
 
-            // свечение
-            if (on || busy || hover)
+            // мягкое радиальное свечение
+            float glowI = Math.Max(onT * (0.75f + 0.25f * pulse), Math.Max(busyT * 0.6f, hoverT * 0.3f));
+            if (glowI > 0.01f)
             {
-                Color glow = on ? Theme.Accent : busy ? Theme.Accent2 : Theme.Accent;
-                int baseA = on ? 26 : busy ? 18 : 10;
-                for (int i = 6; i >= 1; i--)
+                float gr = R + 18 + 3 * pulse * onT;
+                using (var path = new GraphicsPath())
                 {
-                    float rr = R + i * 3f + (on ? pulse * 4 : 0);
-                    using (var br = new SolidBrush(Theme.Alpha(glow, baseA - i * 2 + (int)(pulse * 6))))
-                        g.FillEllipse(br, cx - rr, cy - rr, rr * 2, rr * 2);
+                    path.AddEllipse(cx - gr, cy - gr, gr * 2, gr * 2);
+                    using (var pb = new PathGradientBrush(path))
+                    {
+                        pb.CenterPoint = new PointF(cx, cy);
+                        pb.CenterColor = Theme.Alpha(accent, (int)(90 * glowI));
+                        pb.SurroundColors = new[] { Theme.Alpha(accent, 0) };
+                        var blend = new ColorBlend(3);
+                        blend.Colors = new[] { Theme.Alpha(accent, 0), Theme.Alpha(accent, (int)(70 * glowI)), Theme.Alpha(accent, (int)(90 * glowI)) };
+                        blend.Positions = new[] { 0f, 0.22f, 1f };
+                        pb.InterpolationColors = blend;
+                        g.FillPath(pb, path);
+                    }
                 }
             }
 
             // внутренний круг
             var inner = new RectangleF(cx - R, cy - R, R * 2, R * 2);
-            using (var br = new LinearGradientBrush(inner, Theme.Mix(Theme.Surface2, Theme.Accent, on ? 0.12f : 0.02f), Theme.Surface, 60f))
+            using (var br = new LinearGradientBrush(inner, Theme.Mix(Theme.Surface2, accent, 0.03f + 0.12f * onT + 0.04f * hoverT), Theme.Surface, 60f))
                 g.FillEllipse(br, inner);
 
-            // кольцо
-            using (var pen = new Pen(Theme.Border, 3f)) g.DrawEllipse(pen, inner);
-            if (on)
-            {
-                using (var br = new LinearGradientBrush(inner, Theme.Accent, Theme.Accent2, 45f + phase * 30))
+            // базовое кольцо
+            using (var pen = new Pen(Theme.Mix(Theme.Border, accent, 0.25f * hoverT), 3f)) g.DrawEllipse(pen, inner);
+
+            // полное градиентное кольцо (подключено) — медленно вращается
+            if (onT > 0.01f)
+                using (var br = new LinearGradientBrush(inner, Theme.Alpha(Theme.Accent, (int)(255 * onT)), Theme.Alpha(Theme.Accent2, (int)(255 * onT)), 45f + phase * 25f))
                 using (var pen = new Pen(br, 4f)) g.DrawEllipse(pen, inner);
-            }
-            else if (busy)
-            {
-                using (var br = new LinearGradientBrush(inner, Theme.Accent, Theme.Accent2, 45f))
+
+            // дуга-спиннер (подключение/отключение)
+            if (busyT > 0.01f)
+                using (var br = new LinearGradientBrush(inner, Theme.Alpha(Theme.Accent, (int)(255 * busyT)), Theme.Alpha(Theme.Accent2, (int)(255 * busyT)), 45f))
                 using (var pen = new Pen(br, 4f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                    g.DrawArc(pen, inner, (phase * 180 / (float)Math.PI * 3) % 360, 110);
-            }
+                    g.DrawArc(pen, inner, (phase * 260f) % 360f, arcLen);
 
             // внутреннее тонкое кольцо
             var inner2 = RectangleF.Inflate(inner, -16, -16);
-            using (var pen = new Pen(Theme.Alpha(on ? Theme.Accent : Theme.Muted, on ? 60 : 30), 1f)) g.DrawEllipse(pen, inner2);
+            using (var pen = new Pen(Theme.Alpha(Theme.Mix(Theme.Muted, Theme.Accent, onT), (int)(30 + 40 * onT)), 1f)) g.DrawEllipse(pen, inner2);
 
-            // иконка
-            Color ic = on ? Color.White : busy ? Theme.Accent2 : hover ? Theme.Accent : Theme.Muted;
-            using (var f = Theme.Icon(46f))
+            // значок питания
+            Color ic = Theme.Mix(Theme.Mix(Theme.Muted, Theme.Accent, Math.Max(hoverT, busyT)), Color.White, onT);
+            using (var f = Theme.Icon(46f * scale))
             using (var br = new SolidBrush(ic))
             {
                 var sz = g.MeasureString(Theme.IcPower, f);
-                g.DrawString(Theme.IcPower, f, br, cx - sz.Width / 2 + 2, cy - sz.Height / 2 - 10);
+                g.DrawString(Theme.IcPower, f, br, cx - sz.Width / 2 + 2, cy - sz.Height / 2 - 10 * scale);
             }
-            string label = on ? I18n.L("ОТКЛЮЧИТЬ") : busy ? I18n.L("ПОДОЖДИТЕ") : I18n.L("ПОДКЛЮЧИТЬ");
+            bool isOn = state == "connected", isBusy = state == "connecting" || state == "stopping";
+            string label = isOn ? I18n.L("ОТКЛЮЧИТЬ") : isBusy ? I18n.L("ПОДОЖДИТЕ") : I18n.L("ПОДКЛЮЧИТЬ");
             using (var f = Theme.UiSemi(8.5f))
-            using (var br = new SolidBrush(on ? Theme.Accent : Theme.Muted))
+            using (var br = new SolidBrush(Theme.Mix(Theme.Muted, Theme.Accent, Math.Max(onT, hoverT * 0.6f))))
             {
                 var sz = g.MeasureString(label, f);
-                g.DrawString(label, f, br, cx - sz.Width / 2, cy + 30);
+                g.DrawString(label, f, br, cx - sz.Width / 2, cy + 30 * scale);
             }
         }
     }
@@ -489,6 +539,80 @@ namespace Hydra
         }
     }
 
+    // Карточка скорости туннеля на главной: ↓/↑ и график за последнюю минуту
+    public class SpeedCard : PaintControl
+    {
+        public string Title = "", Sub = "";
+        public Color Dot = Theme.Muted;
+        public long Up, Down;
+        readonly float[] histDown = new float[60], histUp = new float[60];
+
+        public SpeedCard() { Size = new Size(204, 110); Margin = new Padding(0, 0, 10, 10); }
+
+        public void Push(long up, long down)
+        {
+            Up = up; Down = down;
+            Array.Copy(histDown, 1, histDown, 0, histDown.Length - 1);
+            Array.Copy(histUp, 1, histUp, 0, histUp.Length - 1);
+            histDown[histDown.Length - 1] = down;
+            histUp[histUp.Length - 1] = up;
+            Invalidate();
+        }
+
+        public void Reset() { Array.Clear(histDown, 0, histDown.Length); Array.Clear(histUp, 0, histUp.Length); Up = Down = 0; Invalidate(); }
+
+        public static string Rate(long bps)
+        {
+            if (bps < 1024) return bps + I18n.L(" Б/с");
+            if (bps < 1024 * 1024) return (bps / 1024.0).ToString(bps < 10 * 1024 ? "0.0" : "0") + I18n.L(" КБ/с");
+            return (bps / 1048576.0).ToString(bps < 10 * 1048576 ? "0.00" : "0.0") + I18n.L(" МБ/с");
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics; Theme.Hq(g);
+            var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+            using (var path = Theme.Round(r, 14))
+            {
+                using (var br = new SolidBrush(Theme.Surface)) g.FillPath(br, path);
+
+                // график: скорость скачивания за 60 секунд
+                float max = 16 * 1024;
+                for (int i = 0; i < histDown.Length; i++) max = Math.Max(max, Math.Max(histDown[i], histUp[i]));
+                float gx = 1, gw = Width - 2, gTop = Height - 34, gh = 32;
+                var pts = new PointF[histDown.Length];
+                for (int i = 0; i < histDown.Length; i++)
+                    pts[i] = new PointF(gx + gw * i / (histDown.Length - 1), gTop + gh - gh * histDown[i] / max);
+                g.SetClip(path);
+                using (var area = new GraphicsPath())
+                {
+                    area.AddLines(pts);
+                    area.AddLine(pts[pts.Length - 1], new PointF(gx + gw, Height));
+                    area.AddLine(new PointF(gx + gw, Height), new PointF(gx, Height));
+                    area.CloseFigure();
+                    using (var br = new LinearGradientBrush(new RectangleF(0, gTop - 1, Width, gh + 2), Theme.Alpha(Dot, 70), Theme.Alpha(Dot, 0), LinearGradientMode.Vertical))
+                        g.FillPath(br, area);
+                }
+                using (var pen = new Pen(Theme.Alpha(Dot, 200), 1.6f)) g.DrawLines(pen, pts);
+                g.ResetClip();
+                using (var pen = new Pen(Theme.Border)) g.DrawPath(pen, path);
+            }
+
+            using (var br = new SolidBrush(Theme.Alpha(Dot, 60))) g.FillEllipse(br, 14, 14, 14, 14);
+            using (var br = new SolidBrush(Dot)) g.FillEllipse(br, 17.5f, 17.5f, 7, 7);
+            var nf = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+            using (var f = Theme.UiSemi(10f)) using (var br = new SolidBrush(Theme.Text))
+                g.DrawString(Title, f, br, new RectangleF(34, 10, Width - 44, 20), nf);
+            using (var f = Theme.Ui(8f)) using (var br = new SolidBrush(Theme.Muted))
+                g.DrawString(Sub, f, br, new RectangleF(34, 29, Width - 44, 16), nf);
+            using (var f = Theme.UiSemi(10f))
+            {
+                using (var br = new SolidBrush(Theme.Text)) g.DrawString("↓ " + Rate(Down), f, br, 14, 50);
+                using (var br = new SolidBrush(Theme.Muted)) g.DrawString("↑ " + Rate(Up), f, br, new RectangleF(Width / 2f, 50, Width / 2f - 12, 20), new StringFormat { Alignment = StringAlignment.Far });
+            }
+        }
+    }
+
     // Маленькая «таблетка» со статусом на главной
     public class Chip : PaintControl
     {
@@ -525,16 +649,8 @@ namespace Hydra
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics; Theme.Hq(g);
-            // значок: три «головы» гидры — три концентрических дуги
-            var box = new RectangleF(20, 18, 36, 36);
-            using (var br = new LinearGradientBrush(box, Theme.Accent, Theme.Accent2, 45f))
-            using (var pen = new Pen(br, 3f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-            {
-                g.DrawArc(pen, box, 200, 140);
-                g.DrawArc(pen, RectangleF.Inflate(box, -7, -7), 200, 140);
-                g.DrawArc(pen, RectangleF.Inflate(box, -14, -14), 200, 140);
-                using (var dot = new SolidBrush(Theme.Accent)) g.FillEllipse(dot, box.X + 15, box.Y + 22, 6, 6);
-            }
+            // значок приложения — тот же, что у exe и в трее
+            using (var icon = Branding.Draw(40, "brand")) g.DrawImage(icon, 16, 16, 40, 40);
             using (var path = new GraphicsPath())
             {
                 using (var ff = new FontFamily("Segoe UI"))

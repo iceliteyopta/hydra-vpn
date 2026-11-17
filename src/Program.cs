@@ -15,6 +15,11 @@ namespace Hydra
         static int Main(string[] args)
         {
             if (args.Length >= 2 && args[0] == "--selftest") return SelfTest.Run(args[1]);
+            if (args.Length >= 2 && args[0] == "--make-icon")
+            {
+                Branding.WriteIco(args[1]);
+                return 0;
+            }
             if (args.Length >= 2 && args[0] == "--update-test")
             {
                 // Проверка самообновления без окна: найти релиз новее, скачать, подменить exe
@@ -45,9 +50,10 @@ namespace Hydra
                 f.ShowInTaskbar = false;
                 f.Shown += (s, e) =>
                 {
-                    foreach (var page in new[] { "home", "tunnels", "rules", "protect", "settings", "history" })
+                    foreach (var page in new[] { "home", "tunnels", "rules", "protect", "settings", "history", "home-connected" })
                     {
-                        f.ShowPageForTest(page);
+                        if (page == "home-connected") { f.DemoTraffic("connected"); f.ShowPageForTest("home"); }
+                        else f.ShowPageForTest(page);
                         Application.DoEvents();
                         System.Threading.Thread.Sleep(150);
                         Application.DoEvents();
@@ -57,7 +63,7 @@ namespace Hydra
                             bmp.Save(Path.Combine(args[1], page + ".png"), System.Drawing.Imaging.ImageFormat.Png);
                         }
                     }
-                    f.Close();
+                    f.ForceClose();
                 };
                 Application.Run(f);
                 return 0;
@@ -70,7 +76,7 @@ namespace Hydra
                     Application.EnableVisualStyles();
                     var f = new MainForm();
                     var tm = new System.Windows.Forms.Timer { Interval = 2000 };
-                    tm.Tick += (s, e) => { tm.Stop(); f.Close(); };
+                    tm.Tick += (s, e) => { tm.Stop(); f.ForceClose(); };
                     tm.Start();
                     Application.Run(f);
                     File.WriteAllText(args[1], "OK");

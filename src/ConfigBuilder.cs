@@ -60,6 +60,9 @@ namespace Hydra
     public static class ConfigBuilder
     {
         public const string TunName = "Hydra";
+        // Задаются движком перед запуском: порт и секрет локального API статистики sing-box
+        public static int StatsPort;
+        public static string StatsSecret = "";
 
         public static BuildResult Build(Profile p, bool resolveHosts)
         {
@@ -271,7 +274,11 @@ namespace Hydra
             cfg["outbounds"] = outbounds;
             if (endpoints.Count > 0) cfg["endpoints"] = endpoints;
             cfg["route"] = route;
-            cfg["experimental"] = D.New("cache_file", D.New("enabled", true, "path", "cache.db"));
+            var exp = D.New("cache_file", D.New("enabled", true, "path", "cache.db"));
+            // Локальный API статистики (только 127.0.0.1, с секретом) — скорость по туннелям в главном окне
+            if (StatsPort > 0)
+                exp["clash_api"] = D.New("external_controller", "127.0.0.1:" + StatsPort, "secret", StatsSecret);
+            cfg["experimental"] = exp;
             res.Config = cfg;
             return res;
         }

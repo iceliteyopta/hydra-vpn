@@ -94,7 +94,7 @@ namespace Hydra
             Size = new Size(1180, 760);
             MinimumSize = new Size(960, 620);
             StartPosition = FormStartPosition.CenterScreen;
-            Icon = MakeIcon(false);
+            Icon = Branding.AppIcon();
             DoubleBuffered = true;
 
             BuildUi();
@@ -106,7 +106,12 @@ namespace Hydra
             loading = false;
 
             engine.Log += s => { FileLog.Write(s); Ui(() => AppendLogUi(s)); };
-            History.Added += ev => Ui(() => { if (pages.ContainsKey("history") && pages["history"].Visible) RefreshHistory(); });
+            History.Added += ev => Ui(() =>
+            {
+                OnHistoryEvent(ev);
+                if (pages.ContainsKey("history") && pages["history"].Visible) RefreshHistory();
+            });
+            engine.Traffic += rates => Ui(() => OnTraffic(rates));
             engine.TunnelStatus += (n, st) => Ui(() => { statuses[n] = st; RefreshStatuses(); });
             engine.StateChanged += st => Ui(() => OnState(st));
             engine.KillChanged += on => Ui(RefreshKill);
@@ -268,24 +273,15 @@ namespace Hydra
             try { if (InvokeRequired) BeginInvoke(a); else a(); } catch (ObjectDisposedException) { } catch (InvalidOperationException) { }
         }
 
-        static Icon MakeIcon(bool on)
+        // Значок в трее: серый — не подключено, цветной — подключено, оранжевый — сбой / kill switch держит
+        string trayIconState;
+        void SetTrayIcon(string st)
         {
-            using (var bmp = new Bitmap(64, 64))
-            {
-                using (var g = Graphics.FromImage(bmp))
-                {
-                    Theme.Hq(g);
-                    var r = new RectangleF(4, 4, 56, 56);
-                    using (var br = new LinearGradientBrush(r, on ? Theme.Accent : Color.FromArgb(70, 80, 110), on ? Theme.Accent2 : Color.FromArgb(50, 56, 80), 45f))
-                        g.FillEllipse(br, r);
-                    using (var pen = new Pen(Color.FromArgb(10, 12, 20), 5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                    {
-                        g.DrawArc(pen, new RectangleF(16, 16, 32, 32), 200, 140);
-                        g.DrawArc(pen, new RectangleF(24, 24, 16, 16), 200, 140);
-                    }
-                }
-                return Icon.FromHandle(bmp.GetHicon());
-            }
+            if (st == trayIconState) return;
+            trayIconState = st;
+            var old = tray.Icon;
+            tray.Icon = Branding.MakeIcon(SystemInformation.SmallIconSize.Width, st);
+            if (old != null) old.Dispose();
         }
 
         // ======================= каркас =======================
@@ -333,17 +329,69 @@ namespace Hydra
             Controls.Add(content);
             Controls.Add(sidebar);
 
-            tray = new NotifyIcon { Icon = MakeIcon(false), Text = AppName, Visible = true };
+            tray = new NotifyIcon { Text = AppName, Visible = true };
+            SetTrayIcon("off");
             var menu = DarkMenu.Create();
-            menu.Items.Add(I18n.L("Открыть Hydra"), null, (s, e) => RestoreWindow());
-            menu.Items.Add(I18n.L("Подключить"), null, (s, e) => Connect());
-            menu.Items.Add(I18n.L("Отключить"), null, (s, e) => engine.Stop());
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add(I18n.L("Выход"), null, (s, e) => Close());
+            menu.Opening += (s, e) => BuildTrayMenu(menu);
+            BuildTrayMenu(menu);
             tray.ContextMenuStrip = menu;
-            tray.DoubleClick += (s, e) => RestoreWindow();
+            // Левый клик — открыть/спрятать окно
+            tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) { if (Visible && WindowState != FormWindowState.Minimized) Hide(); else RestoreWindow(); } };
+            tray.BalloonTipClicked += (s, e) => { RestoreWindow(); if (balloonPage != null) ShowPage(balloonPage); };
             Resize += (s, e) => { if (WindowState == FormWindowState.Minimized) Hide(); };
             FormClosing += OnClosing;
+        }
+
+        bool exiting;
+        bool trayHintShown;
+        string balloonPage;
+
+        // Меню трея собирается заново при каждом открытии: состояние, туннели со скоростью, действия
+        void BuildTrayMenu(ContextMenuStrip menu)
+        {
+            menu.Items.Clear();
+            bool on = state == "connected", busy = state == "connecting" || state == "stopping";
+            var head = menu.Items.Add("●  " + (on ? I18n.L("Защищено") : busy ? sideStatus.Text : I18n.L("Не подключено")));
+            head.Enabled = false;
+            head.Font = Theme.UiSemi(9.5f);
+            if (on)
+            {
+                foreach (var t in P.Tunnels)
+                {
+                    if (!t.Enabled) continue;
+                    long[] r;
+                    string speed = lastRates.TryGetValue(t.Name, out r) ? "   ↓ " + SpeedCard.Rate(r[1]) + "  ↑ " + SpeedCard.Rate(r[0]) : "";
+                    var it = menu.Items.Add("     " + t.Name + "  ·  " + (StatusOf(t).Length > 0 ? StatusOf(t) : TypeLabel(t)) + speed);
+                    it.Enabled = false;
+                }
+            }
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(I18n.L("Открыть Hydra"), null, (s, e) => RestoreWindow());
+            if (on || state == "connecting") menu.Items.Add(I18n.L("Отключить"), null, (s, e) => engine.Stop());
+            else if (state == "stopped") menu.Items.Add(I18n.L("Подключить"), null, (s, e) => Connect());
+            if (engine.KillActive && state == "stopped") menu.Items.Add(I18n.L("Снять блокировку"), null, (s, e) => engine.ReleaseKill());
+            menu.Items.Add(I18n.L("История"), null, (s, e) => { RestoreWindow(); ShowPage("history"); });
+            menu.Items.Add(new ToolStripSeparator());
+            menu.Items.Add(I18n.L("Выход"), null, (s, e) => { exiting = true; Close(); });
+        }
+
+        void Notify(string title, string text, ToolTipIcon icon, string page)
+        {
+            balloonPage = page;
+            try { tray.ShowBalloonTip(6000, title, text, icon); } catch { }
+        }
+
+        // Уведомления о сбоях из истории событий
+        void OnHistoryEvent(HistoryEvent ev)
+        {
+            if (!P.NotifyFailures) return;
+            string k = ev.Kind;
+            if (k == History.Dropped) Notify(I18n.L("VPN оборвался"), ev.Text + (engine.KillActive ? I18n.L("\nKill switch держит защищённые программы офлайн.") : ""), ToolTipIcon.Error, "history");
+            else if (k == History.Error) Notify(I18n.L("Не удалось подключиться"), ev.Details ?? ev.Text, ToolTipIcon.Error, "log");
+            else if (k == History.TunnelError) Notify(ev.Text, ev.Details ?? "", ToolTipIcon.Warning, "history");
+            else if (k == History.Crash) Notify(ev.Text, ev.Details ?? "", ToolTipIcon.Error, "history");
+            else if (k == History.KillHold) Notify(I18n.L("Kill switch сработал"), I18n.L("Защищённые программы отрезаны от интернета, пока VPN не поднимется."), ToolTipIcon.Warning, "home");
+            else if (k == History.Connected && !Visible) Notify(I18n.L("VPN подключён"), ev.Details ?? "", ToolTipIcon.Info, "home");
         }
 
         void AddNav(FlowLayoutPanel nav, string key, string text, string glyph)
@@ -365,7 +413,32 @@ namespace Hydra
 
         public void ShowPageForTest(string key) { ShowPage(key); }
 
-        void RestoreWindow() { Show(); WindowState = FormWindowState.Normal; Activate(); }
+        // Настоящий выход (а не «спрятать в трей»): для тестовых режимов
+        public void ForceClose() { exiting = true; Close(); }
+
+        // Для скриншотов: показать карточки скорости с демо-данными
+        public void DemoTraffic(string st)
+        {
+            OnState(st);
+            var rnd = new Random(7);
+            for (int i = 0; i < 60; i++)
+            {
+                var rates = new Dictionary<string, long[]>();
+                foreach (var t in P.Tunnels)
+                    if (t.Enabled) rates[t.Name] = new long[] { rnd.Next(20, 120) * 1024, (long)((Math.Sin(i / 6.0 + t.Name.Length) + 1.3) * rnd.Next(300, 900) * 1024) };
+                rates["direct"] = new long[] { rnd.Next(5, 40) * 1024, rnd.Next(50, 400) * 1024 };
+                OnTraffic(rates);
+            }
+        }
+
+        void RestoreWindow()
+        {
+            Show();
+            if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+            ShowInTaskbar = true;
+            BringToFront();
+            Activate();
+        }
 
         // Страница: заголовок + (панель инструментов) + тело
         Panel Page(string title, string subtitle, Control toolbar, Control body)
@@ -411,6 +484,7 @@ namespace Hydra
             lblStatus = new Label { AutoSize = true, Font = Theme.UiBold(22f), ForeColor = Theme.Text, BackColor = Theme.Bg };
             lblSub = new Label { AutoSize = true, Font = Theme.Ui(10f), ForeColor = Theme.Muted, BackColor = Theme.Bg };
             homeChips = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Bg, MaximumSize = new Size(760, 0) };
+            speedPanel = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = Theme.Bg, MaximumSize = new Size(760, 0) };
 
             coreBanner = new Card { Height = 64, Fill = Theme.Mix(Theme.Surface, Theme.Accent, 0.08f), Visible = false };
             coreText = new Label { AutoSize = true, ForeColor = Theme.Text, Font = Theme.UiSemi(9.5f), Location = new Point(18, 12), BackColor = Color.Transparent };
@@ -454,8 +528,10 @@ namespace Hydra
             body.Controls.Add(lblStatus);
             body.Controls.Add(lblSub);
             body.Controls.Add(homeChips);
+            body.Controls.Add(speedPanel);
             body.Resize += (s, e) => LayoutHome(body);
             homeChips.SizeChanged += (s, e) => LayoutHome(body);
+            speedPanel.SizeChanged += (s, e) => LayoutHome(body);
             lblStatus.SizeChanged += (s, e) => LayoutHome(body);
             lblSub.SizeChanged += (s, e) => LayoutHome(body);
 
@@ -476,7 +552,74 @@ namespace Hydra
             power.Location = new Point((w - power.Width) / 2, top);
             lblStatus.Location = new Point((w - lblStatus.Width) / 2, power.Bottom + 6);
             lblSub.Location = new Point((w - lblSub.Width) / 2, lblStatus.Bottom + 4);
-            homeChips.Location = new Point(Math.Max(0, (w - homeChips.Width) / 2), lblSub.Bottom + 22);
+            int y = lblSub.Bottom + 20;
+            speedPanel.MaximumSize = new Size(Math.Max(260, w), 0);
+            homeChips.MaximumSize = new Size(Math.Max(260, w), 0);
+            if (speedPanel.Visible && speedPanel.Controls.Count > 0)
+            {
+                speedPanel.Location = new Point(Math.Max(0, (w - speedPanel.Width) / 2), y);
+                y = speedPanel.Bottom + 4;
+            }
+            homeChips.Location = new Point(Math.Max(0, (w - homeChips.Width) / 2), y);
+        }
+
+        // ======================= скорость по туннелям =======================
+        FlowLayoutPanel speedPanel;
+        readonly Dictionary<string, SpeedCard> speedCards = new Dictionary<string, SpeedCard>();
+        Dictionary<string, long[]> lastRates = new Dictionary<string, long[]>();
+        string speedKey = "";
+
+        // Карточки: по одной на включённый туннель + «Напрямую»
+        void SyncSpeedCards()
+        {
+            var names = new List<string>();
+            foreach (var t in P.Tunnels) if (t.Enabled) names.Add(t.Name);
+            string key = string.Join("\n", names.ToArray());
+            if (key != speedKey)
+            {
+                speedKey = key;
+                speedPanel.SuspendLayout();
+                speedPanel.Controls.Clear();
+                speedCards.Clear();
+                foreach (var n in names)
+                {
+                    var c = new SpeedCard { Title = n };
+                    speedCards[n] = c;
+                    speedPanel.Controls.Add(c);
+                }
+                var d = new SpeedCard { Title = DirectLabel, Sub = I18n.L("без VPN"), Dot = Theme.Muted };
+                speedCards["direct"] = d;
+                speedPanel.Controls.Add(d);
+                speedPanel.ResumeLayout();
+            }
+            foreach (var t in P.Tunnels)
+            {
+                SpeedCard c;
+                if (!t.Enabled || !speedCards.TryGetValue(t.Name, out c)) continue;
+                string st = StatusOf(t);
+                c.Sub = TypeLabel(t) + (st.Length > 0 ? "  ·  " + st : "");
+                c.Dot = st.Length > 0 ? TunnelCard.StatusColor(st) : Theme.Accent;
+                c.Invalidate();
+            }
+            speedPanel.Visible = state == "connected" || state == "connecting";
+        }
+
+        void OnTraffic(Dictionary<string, long[]> rates)
+        {
+            lastRates = rates;
+            foreach (var kv in speedCards)
+            {
+                long[] r;
+                if (rates.TryGetValue(kv.Key, out r)) kv.Value.Push(r[0], r[1]);
+                else kv.Value.Push(0, 0);
+            }
+            long[] tot;
+            if (rates.TryGetValue("", out tot) && state == "connected")
+            {
+                string tip = AppName + "  ↓ " + SpeedCard.Rate(tot[1]) + "  ↑ " + SpeedCard.Rate(tot[0]);
+                tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
+            }
+            if (rates.Count == 0) foreach (var c in speedCards.Values) c.Reset();
         }
 
         void RefreshHome()
@@ -499,6 +642,11 @@ namespace Hydra
             if (P.KillSwitch)
                 homeChips.Controls.Add(new Chip("Kill switch" + (engine.KillActive ? I18n.L(" · блокирует без VPN") : I18n.L(" · включится при подключении")), engine.KillActive ? Theme.Accent : Theme.Border));
             homeChips.ResumeLayout();
+            // Пока подключено, туннели показаны карточками скорости — таблетки туннелей прячем
+            SyncSpeedCards();
+            if (speedPanel.Visible)
+                for (int i = homeChips.Controls.Count - 1; i >= 0; i--)
+                    if (!homeChips.Controls[i].Text.StartsWith("Kill switch")) homeChips.Controls.RemoveAt(i);
 
             killBanner.Visible = engine.KillActive && state == "stopped";
             killBannerText.Text = I18n.L("VPN не работает, а kill switch держит блокировку: защищённые программы и адреса без VPN не выйдут в интернет.");
@@ -910,6 +1058,11 @@ namespace Hydra
             checkNow.Click += (s, e) => CheckForUpdates(true);
             updRow.Controls.Add(tgUpd); updRow.Controls.Add(checkNow);
             AddRow(tl, I18n.L("Проверять обновления"), updRow, I18n.L("При запуске Hydra смотрит последний релиз на GitHub. Текущая версия: ") + Updater.CurrentVersion);
+
+            var tgNotify = new ToggleSwitch();
+            tgNotify.SetSilently(P.NotifyFailures);
+            tgNotify.CheckedChanged += (s, e) => { P.NotifyFailures = tgNotify.Checked; Save(); };
+            AddRow(tl, I18n.L("Уведомления о сбоях"), tgNotify, I18n.L("Всплывающие уведомления Windows: обрыв VPN, туннель не отвечает, ошибка подключения, kill switch, сбой Hydra"));
 
             var folder = new FlatButton(I18n.L("Открыть папку Hydra"), Theme.IcFolder, ButtonKind.Secondary);
             folder.Click += (s, e) => Process.Start("explorer.exe", "\"" + AppPaths.BaseDir + "\"");
@@ -1442,9 +1595,7 @@ namespace Hydra
             sideDotColor = on ? Theme.Good : st == "stopped" ? (engine.KillActive ? Theme.Warn : Theme.Muted) : Theme.Warn;
             sideDot.Invalidate();
             tray.Text = AppName + I18n.L(" — ") + sideStatus.Text;
-            tray.Icon = MakeIcon(on);
-            if (prev == "connected" && st == "stopped" && engine.KillActive)
-                tray.ShowBalloonTip(5000, AppName, I18n.L("VPN упал. Kill switch не выпускает защищённые программы в интернет без VPN."), ToolTipIcon.Warning);
+            SetTrayIcon(on ? "on" : st == "stopped" && engine.KillActive ? "warn" : "off");
             RefreshHome();
             RefreshKill();
         }
@@ -1464,9 +1615,24 @@ namespace Hydra
 
         void OnClosing(object sender, FormClosingEventArgs e)
         {
+            // Крестик прячет окно в трей; выход — через меню трея («Выход»), обновление или выключение Windows
+            if (!exiting && e.CloseReason == CloseReason.UserClosing && !updBusy)
+            {
+                e.Cancel = true;
+                Hide();
+                if (!trayHintShown)
+                {
+                    trayHintShown = true;
+                    Notify(AppName, I18n.L("Hydra работает в трее. Выход — правой кнопкой по значку → «Выход»."), ToolTipIcon.Info, "home");
+                }
+                return;
+            }
             if (engine.State != "stopped")
             {
-                if (MessageBox.Show(this, I18n.L("Отключить все туннели и выйти?"), AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) { e.Cancel = true; return; }
+                if (e.CloseReason == CloseReason.UserClosing && !updBusy &&
+                    MessageBox.Show(this, I18n.L("Отключить все туннели и выйти?"), AppName, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+                { e.Cancel = true; exiting = false; return; }
+                // Выход и выключение Windows: корректно гасим туннели и снимаем правила kill switch
                 Cursor = Cursors.WaitCursor;
                 engine.StopBlocking();
             }
