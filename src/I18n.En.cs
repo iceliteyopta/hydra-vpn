@@ -317,6 +317,15 @@ namespace Hydra
             T("Hydra работает в трее. Выход — правой кнопкой по значку → «Выход».", "Hydra keeps running in the tray. To quit, right-click the icon → Exit.");
             T("Уведомления о сбоях", "Failure notifications");
             T("Всплывающие уведомления Windows: обрыв VPN, туннель не отвечает, ошибка подключения, kill switch, сбой Hydra", "Windows notifications: VPN drop, unresponsive tunnel, connection error, kill switch, Hydra crash");
+            // --- автопереподключение ---
+            T("Автопереподключение: ", "Auto-reconnect: ");
+            T("Автопереподключение VPN", "VPN auto-reconnect");
+            T("Переподключаю VPN", "Reconnecting VPN");
+            T("Автопереподключение", "Auto-reconnect");
+            T("Если туннель перестал отвечать, Hydra сама переподключит VPN (kill switch при этом не снимается). Не чаще раза в 3 минуты.", "If a tunnel stops responding, Hydra reconnects the VPN by itself (the kill switch stays on). At most once every 3 minutes.");
+            T("Автопереподключение уже не помогло 3 раза за 30 минут. Проверьте сервер или переподключитесь вручную.", "Auto-reconnect has not helped 3 times in 30 minutes. Check the server or reconnect manually.");
+            T("туннель «", "tunnel “");
+            T("» перестал отвечать", "” stopped responding");
             // --- Program ---
             T("Для работы VPN нужны права администратора.", "Hydra needs administrator rights to run the VPN.");
             T("Hydra уже запущена (иконка в трее).", "Hydra is already running (see the tray icon).");

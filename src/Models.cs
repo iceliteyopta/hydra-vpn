@@ -80,6 +80,8 @@ namespace Hydra
         public string SkippedVersion { get; set; }
         // Уведомления Windows о сбоях
         public bool NotifyFailures { get; set; }
+        // Переподключать VPN, если туннель перестал отвечать
+        public bool AutoReconnect { get; set; }
         // Версия, запускавшаяся в прошлый раз (после обновления обновляем значок в кэше Windows)
         public string LastRunVersion { get; set; }
 
@@ -87,6 +89,7 @@ namespace Hydra
         {
             CheckUpdates = true;
             NotifyFailures = true;
+            AutoReconnect = true;
             SkippedVersion = "";
             KillApps = new List<string>(Hydra.KillSwitch.DefaultApps);
             KillDomains = Hydra.KillSwitch.DefaultDomains;

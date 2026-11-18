@@ -32,9 +32,34 @@ namespace Hydra
         readonly Dictionary<string, DateTime> tunnelAlerted = new Dictionary<string, DateTime>();
         HashSet<string> tunnelTags = new HashSet<string>();
 
-        void WatchLine(string line)
+        readonly Dictionary<string, DateTime> reestablished = new Dictionary<string, DateTime>();
+
+        void WatchLine(string line) { WatchAt(line, DateTime.Now); }
+
+        // Для проверки на старых журналах: те же правила, но со временем из журнала
+        public string ReplayLine(string line, DateTime at, HashSet<string> tags)
         {
+            tunnelTags = tags;
+            string fired = null;
+            Action<string, string> probe = (t, m) => fired = t;
+            TunnelProblem += probe;
+            WatchAt(line, at);
+            TunnelProblem -= probe;
+            return fired;
+        }
+
+        void WatchAt(string line, DateTime now)
+        {
+            // Туннель переподключился сам (у рабочего OpenVPN — каждые ~2 часа): следующие 2 минуты следим строже
+            if (line.IndexOf("re-established", StringComparison.Ordinal) >= 0)
+                foreach (var tag in tunnelTags)
+                    if (line.IndexOf("[" + tag + "]", StringComparison.Ordinal) >= 0)
+                        lock (tunnelErrors) reestablished[tag] = now;
             if (line.IndexOf("ERROR", StringComparison.Ordinal) < 0) return;
+            // Считаем только «туннель не довёз»: таймауты. Шум не считаем: служба обновлений Windows (порт 7680)
+            // стучится в соседей по локальной сети, а «no route to host» — это просто адрес вне сетей сервера.
+            if (line.IndexOf("timed out", StringComparison.Ordinal) < 0 && line.IndexOf("i/o timeout", StringComparison.Ordinal) < 0) return;
+            if (line.IndexOf(":7680", StringComparison.Ordinal) >= 0) return;
             foreach (var tag in tunnelTags)
             {
                 if (line.IndexOf("[" + tag + "]", StringComparison.Ordinal) < 0) continue;
@@ -42,11 +67,11 @@ namespace Hydra
                 lock (tunnelErrors)
                 {
                     if (!tunnelErrors.TryGetValue(tag, out list)) tunnelErrors[tag] = list = new List<DateTime>();
-                    var now = DateTime.Now;
                     list.Add(now);
                     list.RemoveAll(t => (now - t).TotalSeconds > 60);
-                    DateTime last;
-                    if (list.Count >= 8 && (!tunnelAlerted.TryGetValue(tag, out last) || (now - last).TotalMinutes > 10))
+                    DateTime last, re;
+                    int threshold = reestablished.TryGetValue(tag, out re) && (now - re).TotalSeconds < 120 ? 3 : 5;
+                    if (list.Count >= threshold && (!tunnelAlerted.TryGetValue(tag, out last) || (now - last).TotalMinutes > 3))
                     {
                         tunnelAlerted[tag] = now;
                         string msg = line.Length > 200 ? line.Substring(line.Length - 200) : line;
@@ -192,7 +217,7 @@ namespace Hydra
             var tags = new HashSet<string>();
             foreach (var t in p.Tunnels) if (t.Enabled) tags.Add(t.Name);
             tunnelTags = tags;
-            lock (tunnelErrors) { tunnelErrors.Clear(); tunnelAlerted.Clear(); }
+            lock (tunnelErrors) { tunnelErrors.Clear(); tunnelAlerted.Clear(); reestablished.Clear(); }
             BuildResult res;
             string cfg = WriteConfig(p, true, out res);
             foreach (var w in res.Warnings) L("! " + w);
@@ -286,8 +311,40 @@ namespace Hydra
             History.Add(History.Connected, I18n.L("VPN подключён"), string.Join(", ", names.ToArray()) + (KillActive ? "  ·  kill switch" : ""));
         }
 
+        // Автопереподключение: гасим и поднимаем всё заново, не снимая kill switch (защищённые программы не проскочат напрямую)
+        public void Restart(Profile p, string reason)
+        {
+            lock (sync) { if (State != "connected") return; }
+            var th = new Thread(() =>
+            {
+                L(I18n.L("Автопереподключение: ") + reason);
+                History.Add(History.Reconnect, I18n.L("Автопереподключение VPN"), reason, SessionSeconds());
+                DoStop(true, true);
+                Thread.Sleep(1500);
+                lock (sync)
+                {
+                    if (State != "stopped") return;
+                    SetState("connecting");
+                }
+                try
+                {
+                    DoStart(p);
+                    lock (sync) { if (State == "connecting") SetState("connected"); }
+                }
+                catch (Exception ex)
+                {
+                    L(I18n.L("ОШИБКА: ") + ex.Message);
+                    History.Add(History.Error, I18n.L("Не удалось подключиться"), ex.Message);
+                    DoStop(true);
+                }
+            });
+            th.IsBackground = true;
+            th.Start();
+        }
+
         // keepKill = true: VPN упал сам — блокировку kill switch оставляем
-        void DoStop(bool keepKill)
+        // quiet = true: это переподключение, а не обрыв — без записей «kill switch сработал»
+        void DoStop(bool keepKill, bool quiet = false)
         {
             lock (sync)
             {
@@ -308,11 +365,12 @@ namespace Hydra
             }
             if (KillActive)
             {
-                if (keepKill)
+                if (keepKill && !quiet)
                 {
                     L(I18n.L("Kill switch держит блокировку: защищённые программы не выйдут в интернет, пока VPN не поднимется или вы не снимете блокировку."));
                     History.Add(History.KillHold, I18n.L("Kill switch заблокировал защищённые программы"));
                 }
+                else if (keepKill) { /* переподключение: правила остаются, через секунду поднимем заново */ }
                 else { KillSwitch.Disable(L); SetKill(false); }
             }
             if (!keepKill && sessionActive)

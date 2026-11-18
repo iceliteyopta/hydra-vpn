@@ -15,6 +15,35 @@ namespace Hydra
         static int Main(string[] args)
         {
             if (args.Length >= 2 && args[0] == "--selftest") return SelfTest.Run(args[1]);
+            if (args.Length >= 4 && args[0] == "--replay-watch")
+            {
+                // Прогнать старые журналы через детектор «туннель не отвечает»:
+                // --replay-watch <выход.txt> <туннели через запятую> <журнал1> [журнал2 ...]
+                var eng = new Engine();
+                var tags = new HashSet<string>(args[2].Split(','));
+                var outp = new StringBuilder();
+                try
+                {
+                for (int i = 3; i < args.Length; i++)
+                {
+                    string day = Path.GetFileNameWithoutExtension(args[i]).Replace("hydra-", "");
+                    // журнал может быть открыт запущенной Hydra — читаем с совместным доступом
+                    using (var fs = new FileStream(args[i], FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var sr = new StreamReader(fs, Encoding.UTF8))
+                    for (string line = sr.ReadLine(); line != null; line = sr.ReadLine())
+                    {
+                        if (line.Length < 20 || line[2] != ':' || line.IndexOf("[sing-box]", 8, Math.Min(14, line.Length - 8), StringComparison.Ordinal) < 0) continue;
+                        DateTime at;
+                        if (!DateTime.TryParseExact(day + " " + line.Substring(0, 8), "yyyy-MM-dd HH:mm:ss", null, System.Globalization.DateTimeStyles.None, out at)) continue;
+                        string fired = eng.ReplayLine(line, at, tags);
+                        if (fired != null) outp.AppendLine(at.ToString("yyyy-MM-dd HH:mm:ss") + "  -> " + fired);
+                    }
+                }
+                }
+                catch (Exception ex) { outp.AppendLine("FAIL " + ex); }
+                File.WriteAllText(args[1], outp.Length > 0 ? outp.ToString() : "no triggers\n");
+                return 0;
+            }
             if (args.Length >= 2 && args[0] == "--make-icon")
             {
                 Branding.WriteIco(args[1]);

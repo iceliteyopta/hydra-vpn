@@ -213,10 +213,10 @@ namespace Hydra
                     dnsRules.Add(dr);
                 }
             }
-            // Подсети, которые отдал рабочий OpenVPN-сервер, идут в OpenVPN раньше любых пользовательских правил
-            int insertAt = 3; // после sniff, hijack-dns и обхода процессов VPN
+            // Подсети, которые отдал OpenVPN-сервер, идут в OpenVPN — но ПОСЛЕ правил пользователя:
+            // сервер может прислать чужие сети (например, Telegram), и явные правила должны быть главнее
             foreach (var tag in nativeOvpn)
-                routeRules.Insert(insertAt++, D.New("preferred_by", new List<object> { tag }, "outbound", tag));
+                routeRules.Add(D.New("preferred_by", new List<object> { tag }, "outbound", tag));
             routeRules.Add(D.New("ip_is_private", true, "outbound", "direct"));
 
             // ---- DNS ----

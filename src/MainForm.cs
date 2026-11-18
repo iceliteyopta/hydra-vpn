@@ -112,6 +112,7 @@ namespace Hydra
                 if (pages.ContainsKey("history") && pages["history"].Visible) RefreshHistory();
             });
             engine.Traffic += rates => Ui(() => OnTraffic(rates));
+            engine.TunnelProblem += (tag, msg) => Ui(() => AutoHeal(tag));
             engine.TunnelStatus += (n, st) => Ui(() => { statuses[n] = st; RefreshStatuses(); });
             engine.StateChanged += st => Ui(() => OnState(st));
             engine.KillChanged += on => Ui(RefreshKill);
@@ -382,6 +383,25 @@ namespace Hydra
             menu.Items.Add(I18n.L("Выход"), null, (s, e) => { exiting = true; Close(); });
         }
 
+        // Автопочинка: туннель перестал отвечать → переподключаем VPN.
+        // Не чаще раза в 3 минуты; после трёх попыток за 30 минут — останавливаемся и только сообщаем.
+        readonly List<DateTime> healAttempts = new List<DateTime>();
+        void AutoHeal(string tag)
+        {
+            if (!P.AutoReconnect || state != "connected") return;
+            var now = DateTime.Now;
+            healAttempts.RemoveAll(t => (now - t).TotalMinutes > 30);
+            if (healAttempts.Count > 0 && (now - healAttempts[healAttempts.Count - 1]).TotalMinutes < 3) return;
+            if (healAttempts.Count >= 3)
+            {
+                Notify(I18n.L("Туннель «") + tag + I18n.L("» не отвечает"), I18n.L("Автопереподключение уже не помогло 3 раза за 30 минут. Проверьте сервер или переподключитесь вручную."), ToolTipIcon.Warning, "log");
+                return;
+            }
+            healAttempts.Add(now);
+            SaveRules();
+            engine.Restart(P, I18n.L("туннель «") + tag + I18n.L("» перестал отвечать"));
+        }
+
         void Notify(string title, string text, ToolTipIcon icon, string page)
         {
             balloonPage = page;
@@ -398,6 +418,7 @@ namespace Hydra
             else if (k == History.TunnelError) Notify(ev.Text, ev.Details ?? "", ToolTipIcon.Warning, "history");
             else if (k == History.Crash) Notify(ev.Text, ev.Details ?? "", ToolTipIcon.Error, "history");
             else if (k == History.KillHold) Notify(I18n.L("Kill switch сработал"), I18n.L("Защищённые программы отрезаны от интернета, пока VPN не поднимется."), ToolTipIcon.Warning, "home");
+            else if (k == History.Reconnect) Notify(I18n.L("Переподключаю VPN"), ev.Details ?? "", ToolTipIcon.Info, "history");
             else if (k == History.Connected && !Visible) Notify(I18n.L("VPN подключён"), ev.Details ?? "", ToolTipIcon.Info, "home");
         }
 
@@ -1071,6 +1092,11 @@ namespace Hydra
             tgNotify.CheckedChanged += (s, e) => { P.NotifyFailures = tgNotify.Checked; Save(); };
             AddRow(tl, I18n.L("Уведомления о сбоях"), tgNotify, I18n.L("Всплывающие уведомления Windows: обрыв VPN, туннель не отвечает, ошибка подключения, kill switch, сбой Hydra"));
 
+            var tgHeal = new ToggleSwitch();
+            tgHeal.SetSilently(P.AutoReconnect);
+            tgHeal.CheckedChanged += (s, e) => { P.AutoReconnect = tgHeal.Checked; Save(); };
+            AddRow(tl, I18n.L("Автопереподключение"), tgHeal, I18n.L("Если туннель перестал отвечать, Hydra сама переподключит VPN (kill switch при этом не снимается). Не чаще раза в 3 минуты."));
+
             var folder = new FlatButton(I18n.L("Открыть папку Hydra"), Theme.IcFolder, ButtonKind.Secondary);
             folder.Click += (s, e) => Process.Start("explorer.exe", "\"" + AppPaths.BaseDir + "\"");
             var preview = new FlatButton(I18n.L("Показать конфиг sing-box"), Theme.IcCode, ButtonKind.Secondary);
@@ -1257,7 +1283,7 @@ namespace Hydra
             if (k == History.Disconnected || k == History.KillRelease) return Theme.Accent;
             if (k == History.Dropped || k == History.KillHold) return Theme.Warn;
             if (k == History.Error || k == History.TunnelError || k == History.Crash) return Theme.Bad;
-            if (k == History.Update) return Theme.Accent2;
+            if (k == History.Update || k == History.Reconnect) return Theme.Accent2;
             return Theme.Muted;
         }
 
