@@ -9,4 +9,16 @@
     <string name="hydra_link">Ввести ссылку Hysteria2</string>
     <string name="hydra_file">Открыть файл профиля</string>
     <string name="hydra_add">Сохранить профиль</string>
+    <string name="hydra_remote">Для подписки открой локальную копию профиля.</string>
+    <string name="hydra_profile_settings">Маршрутизация и DNS</string>
+    <string name="hydra_edit_profile">Настроить выбранный профиль</string>
+    <string name="hydra_lockdown">Постоянный VPN и блокировка соединений</string>
+    <string name="hydra_conflict">Профиль изменился. Открой его заново.</string>
+    <string name="hydra_default_route">Маршрут по умолчанию</string>
+    <string name="hydra_default_dns">DNS по умолчанию</string>
+    <string name="hydra_log_level">Уровень журнала</string>
+    <string name="hydra_strict">Строгая маршрутизация</string>
+    <string name="hydra_route_rules">Правила по порядку (JSON)</string>
+    <string name="hydra_apply_next">Изменения вступят в силу при следующем подключении.</string>
+    <string name="hydra_save">Сохранить</string>
 </resources>

@@ -23,6 +23,14 @@ def wait_for(match, timeout=80):
     while time.monotonic() < until:
         try:
             visible = nodes()
+            # A cold Pixel Launcher can time out during emulator boot. Dismiss
+            # only its own prompt; keep Hydra errors visible for diagnosis.
+            if any("Pixel Launcher isn't responding" in n.get("text", "") for n in visible):
+                choice = next((n for n in visible if n.get("text") == "Wait"), None)
+                if choice is not None:
+                    tap(choice.attrib)
+                    adb("shell", "am", "start", "-n", PACKAGE + "/io.nekohasekai.sfa.compose.MainActivity")
+                    continue
             for node in visible:
                 if match(node.attrib):
                     return node.attrib

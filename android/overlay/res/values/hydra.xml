@@ -9,4 +9,16 @@
     <string name="hydra_link">Enter Hysteria2 link</string>
     <string name="hydra_file">Open profile file</string>
     <string name="hydra_add">Save profile</string>
+    <string name="hydra_remote">Edit a local copy of this subscription.</string>
+    <string name="hydra_profile_settings">Routing and DNS</string>
+    <string name="hydra_edit_profile">Edit active profile</string>
+    <string name="hydra_lockdown">Always-on VPN and connection blocking</string>
+    <string name="hydra_conflict">The profile changed. Reopen it to edit.</string>
+    <string name="hydra_default_route">Default route</string>
+    <string name="hydra_default_dns">Default DNS</string>
+    <string name="hydra_log_level">Log level</string>
+    <string name="hydra_strict">Strict routing</string>
+    <string name="hydra_route_rules">Ordered rules (JSON)</string>
+    <string name="hydra_apply_next">Changes apply at the next connection.</string>
+    <string name="hydra_save">Save</string>
 </resources>

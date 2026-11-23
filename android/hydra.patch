@@ -233,6 +233,19 @@ index 78d08d1..75cc158 100644
              // Dynamic dashboard cards
              // Show cards when service is running OR if it's the Profiles card (always available)
              val serviceRunning = uiState.isStatusVisible
+diff --git a/app/src/main/java/io/nekohasekai/sfa/compose/screen/settings/SettingsScreen.kt b/app/src/main/java/io/nekohasekai/sfa/compose/screen/settings/SettingsScreen.kt
+index e480f9d..7d296d4 100644
+--- a/app/src/main/java/io/nekohasekai/sfa/compose/screen/settings/SettingsScreen.kt
++++ b/app/src/main/java/io/nekohasekai/sfa/compose/screen/settings/SettingsScreen.kt
+@@ -84,6 +84,8 @@ fun SettingsScreen(navController: NavController) {
+                 bottom = scaffoldPadding.calculateBottomPadding() + 8.dp,
+             ),
+     ) {
++        HydraProfileSettings()
++
+         // General Settings Group
+         Card(
+             modifier =
 diff --git a/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml b/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
 index c78bee3..3f2e87c 100644
 --- a/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
