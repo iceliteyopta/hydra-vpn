@@ -20,7 +20,7 @@ cargo build --manifest-path rust/Cargo.toml --locked --release --target aarch64-
 install -Dm755 rust/target/aarch64-linux-android/release/libhydra_routing.so mobile/app/src/main/jniLibs/arm64-v8a/libhydra_import.so
 (cd engine && make lib_install && go run ./cmd/internal/build_libbox -target android -platform android/arm64,android/amd64)
 install -Dm644 engine/libbox.aar mobile/app/libs/libbox.aar
-sed -i 's/^VERSION_CODE=.*/VERSION_CODE=2500/; s/^VERSION_NAME=.*/VERSION_NAME=2.5.0/' mobile/version.properties
+sed -i 's/^VERSION_CODE=.*/VERSION_CODE=2501/; s/^VERSION_NAME=.*/VERSION_NAME=2.5.1/' mobile/version.properties
 (cd mobile && ./gradlew :app:assembleOtherRelease)
 
 apk=$(find mobile/app/build/outputs/apk/other/release -name '*universal*.apk' -print -quit)

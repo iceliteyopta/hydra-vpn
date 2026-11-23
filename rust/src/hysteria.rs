@@ -29,6 +29,17 @@ pub fn config(input: &str) -> Result<serde_json::Value, &'static str> {
     let mut obfs_pass = String::new();
     for (key, value) in uri.query_pairs() {
         match key.as_ref() {
+            "sni" if value.is_empty() => {}
+            "security" if value.eq_ignore_ascii_case("tls") => {}
+            // Browser fingerprint hints belong to TCP TLS clients, not the QUIC handshake.
+            "fp" => {}
+            "alpn" => {
+                let protocols: Vec<_> = value.split(',').map(str::trim).collect();
+                if protocols.iter().any(|p| p.is_empty() || p.len() > 255) {
+                    return Err("Invalid ALPN list");
+                }
+                tls["alpn"] = json!(protocols);
+            }
             "sni" => tls["server_name"] = json!(value),
             "insecure" => {
                 tls["insecure"] = json!(match value.as_ref() {
@@ -60,6 +71,14 @@ pub fn config(input: &str) -> Result<serde_json::Value, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn imports_mobile_share_link() {
+        let cfg = config("hysteria2://example@example.org:26257?alpn=h3&fp=chrome&security=tls&sni=#TEST_phone").unwrap();
+        assert_eq!(cfg["outbounds"][0]["tls"], json!({"enabled":true,"alpn":["h3"]}));
+        assert_eq!(cfg["outbounds"][0]["server_port"], 26257);
+        assert!(config("hy2://example@example.org?security=none").is_err());
+    }
+
     #[test]
     fn tunnel_is_default() {
         let cfg = config(
