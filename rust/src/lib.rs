@@ -176,3 +176,38 @@ mod tests {
 pub mod hysteria;
 pub mod openvpn;
 pub mod profile;
+#[cfg(target_os = "android")]
+mod android {
+    use jni::{
+        objects::{JClass, JString},
+        sys::jstring,
+        JNIEnv,
+    };
+
+    #[no_mangle]
+    pub extern "system" fn Java_io_nekohasekai_sfa_compose_screen_configuration_HydraImporter_parse(
+        mut env: JNIEnv,
+        _class: JClass,
+        input: JString,
+    ) -> jstring {
+        let result = (|| {
+            let text: String = env
+                .get_string(&input)
+                .map_err(|_| "Invalid profile link")?
+                .into();
+            if text.len() > 65536 {
+                return Err("Profile link is too large");
+            }
+            let config = crate::hysteria::config(&text)?;
+            env.new_string(config.to_string())
+                .map_err(|_| "Cannot create profile")
+        })();
+        match result {
+            Ok(value) => value.into_raw(),
+            Err(message) => {
+                let _ = env.throw_new("java/lang/IllegalArgumentException", message);
+                std::ptr::null_mut()
+            }
+        }
+    }
+}

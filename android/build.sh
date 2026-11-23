@@ -7,8 +7,8 @@ export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/l
 git -C mobile apply "$root/android/hydra.patch"
 cp -R android/overlay/. mobile/app/src/main/
 rustup target add aarch64-linux-android
-cargo build --manifest-path rust/Cargo.toml --locked --release --target aarch64-linux-android --bin hydra-import
-install -Dm755 rust/target/aarch64-linux-android/release/hydra-import mobile/app/src/main/jniLibs/arm64-v8a/libhydra_import.so
+cargo build --manifest-path rust/Cargo.toml --locked --release --target aarch64-linux-android --lib
+install -Dm755 rust/target/aarch64-linux-android/release/libhydra_routing.so mobile/app/src/main/jniLibs/arm64-v8a/libhydra_import.so
 (cd engine && make lib_install && go run ./cmd/internal/build_libbox -target android -platform android/arm64)
 install -Dm644 engine/libbox.aar mobile/app/libs/libbox.aar
 (cd mobile && ./gradlew :app:assembleOtherDebug)

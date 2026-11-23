@@ -36,3 +36,32 @@ jobs:
           name: Hydra-Android-arm64
           path: mobile/app/build/outputs/apk/other/debug/*arm64-v8a*.apk
           if-no-files-found: error
+  android-test:
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Hydra-Android-arm64
+          path: input
+      - name: Enable hardware acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash android/ui-test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Hydra-Android-test
+          path: |
+            hydra-android-connected.png
+            test-server.log
+            fixture.log
