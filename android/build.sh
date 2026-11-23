@@ -12,3 +12,12 @@ install -Dm755 rust/target/aarch64-linux-android/release/libhydra_routing.so mob
 (cd engine && make lib_install && go run ./cmd/internal/build_libbox -target android -platform android/arm64)
 install -Dm644 engine/libbox.aar mobile/app/libs/libbox.aar
 (cd mobile && ./gradlew :app:assembleOtherDebug)
+
+apk=$(find mobile/app/build/outputs/apk/other/debug -name '*arm64-v8a*.apk' -print -quit)
+aapt=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+"$aapt" dump badging "$apk" > labels.txt
+grep -q "^application-label:'Hydra'$" labels.txt
+if grep '^application-label-' labels.txt | grep -v ":'Hydra'$"; then
+    echo "Unexpected localized launcher label" >&2
+    exit 1
+fi

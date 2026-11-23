@@ -246,6 +246,54 @@ index c78bee3..3f2e87c 100644
 +    <foreground android:drawable="@drawable/hydra_adaptive" />
 +    <monochrome android:drawable="@drawable/hydra_status" />
  </adaptive-icon>
+diff --git a/app/src/main/res/values-fa/strings.xml b/app/src/main/res/values-fa/strings.xml
+index d2aeb5b..9892790 100644
+--- a/app/src/main/res/values-fa/strings.xml
++++ b/app/src/main/res/values-fa/strings.xml
+@@ -1,7 +1,6 @@
+ <?xml version='1.0' encoding='utf-8'?>
+ <resources>
+     <!-- App -->
+-    <string name="app_name" translatable="false">sing-box</string>
+     <string name="app_version_title">نسخه برنامه</string>
+     <string name="language">زبان</string>
+     <string name="system_default">پیش‌فرض سیستم</string>
+diff --git a/app/src/main/res/values-ru-rRU/strings.xml b/app/src/main/res/values-ru-rRU/strings.xml
+index 652e509..631b201 100644
+--- a/app/src/main/res/values-ru-rRU/strings.xml
++++ b/app/src/main/res/values-ru-rRU/strings.xml
+@@ -1,7 +1,6 @@
+ <?xml version='1.0' encoding='utf-8'?>
+ <resources>
+     <!-- App -->
+-    <string name="app_name" translatable="false">sing-box</string>
+     <string name="app_version_title">Версия приложения</string>
+     <string name="language">Язык</string>
+     <string name="system_default">Системный по умолчанию</string>
+diff --git a/app/src/main/res/values-zh-rCN/strings.xml b/app/src/main/res/values-zh-rCN/strings.xml
+index 88ee5df..ce056df 100644
+--- a/app/src/main/res/values-zh-rCN/strings.xml
++++ b/app/src/main/res/values-zh-rCN/strings.xml
+@@ -1,7 +1,6 @@
+ <?xml version='1.0' encoding='utf-8'?>
+ <resources>
+     <!-- App -->
+-    <string name="app_name" translatable="false">sing-box</string>
+     <string name="app_version_title">应用版本</string>
+     <string name="language">语言</string>
+     <string name="system_default">跟随系统</string>
+diff --git a/app/src/main/res/values-zh-rTW/strings.xml b/app/src/main/res/values-zh-rTW/strings.xml
+index d656b2e..10e98ef 100644
+--- a/app/src/main/res/values-zh-rTW/strings.xml
++++ b/app/src/main/res/values-zh-rTW/strings.xml
+@@ -1,7 +1,6 @@
+ <?xml version='1.0' encoding='utf-8'?>
+ <resources>
+     <!-- App -->
+-    <string name="app_name" translatable="false">sing-box</string>
+     <string name="app_version_title">應用程式版本</string>
+     <string name="language">語言</string>
+     <string name="system_default">跟隨系統</string>
 diff --git a/app/src/main/res/values/ic_launcher_background.xml b/app/src/main/res/values/ic_launcher_background.xml
 index 9fe034e..6b9c032 100644
 --- a/app/src/main/res/values/ic_launcher_background.xml
