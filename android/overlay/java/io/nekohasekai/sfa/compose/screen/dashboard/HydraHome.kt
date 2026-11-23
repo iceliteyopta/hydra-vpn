@@ -2,7 +2,15 @@ package io.nekohasekai.sfa.compose.screen.dashboard
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
+import androidx.compose.foundation.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import io.nekohasekai.sfa.compose.theme.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,32 +57,42 @@ fun HydraHome(state: DashboardUiState, toggle: () -> Unit) {
     val idle = state.serviceStatus == Status.Stopped
     val active = state.serviceStatus == Status.Started
     Column(
-        Modifier.fillMaxWidth().background(
-            Brush.linearGradient(listOf(Color(0xff11182d), Color(0xff242042))),
-            RoundedCornerShape(24.dp),
-        ).padding(24.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(painterResource(R.drawable.hydra_logo), null, Modifier.size(56.dp))
-            Spacer(Modifier.width(12.dp))
-            Column {
-                Text("Hydra", color = Color.White, style = MaterialTheme.typography.headlineMedium)
-                Text(stringResource(when(state.serviceStatus) {
-                    Status.Stopped -> R.string.hydra_off
-                    Status.Starting -> R.string.hydra_starting
-                    Status.Started -> R.string.hydra_on
-                    Status.Stopping -> R.string.hydra_stopping
-                }), color = Color(0xffa4dcf0))
+        val canToggle = state.selectedProfileId >= 0 && (idle || active) && !busy
+        val ring = Brush.linearGradient(listOf(HydraCyan, HydraViolet))
+        Box(
+            modifier = Modifier.size(164.dp).clip(CircleShape)
+                .background(Brush.verticalGradient(listOf(Color(0xff182838), HydraPanel)))
+                .border(3.dp, ring, CircleShape)
+                .clickable(enabled = canToggle, role = Role.Button, onClick = toggle)
+                .padding(12.dp).border(1.dp, HydraBorder, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val ink = if (active) HydraCyan else HydraMuted
+                Canvas(Modifier.size(52.dp)) {
+                    val stroke = 3.5.dp.toPx()
+                    drawArc(ink, -62f, 304f, false, Offset(stroke, stroke),
+                        androidx.compose.ui.geometry.Size(size.width - 2 * stroke, size.height - 2 * stroke),
+                        style = Stroke(stroke, cap = StrokeCap.Round))
+                    drawLine(ink, Offset(size.width / 2, stroke), Offset(size.width / 2, size.height * .45f), stroke, StrokeCap.Round)
+                }
+                Text(stringResource(if (active) R.string.hydra_disconnect else R.string.hydra_connect),
+                    color = ink, style = MaterialTheme.typography.labelLarge)
             }
         }
-        Text(state.selectedProfileName ?: stringResource(R.string.hydra_empty), color = Color.White)
-        if (state.selectedProfileId >= 0) {
-            Button(onClick = toggle, enabled = !busy && (active || idle)) {
-                Text(stringResource(if (active) R.string.hydra_disconnect else R.string.hydra_connect))
-            }
-        }
-        if (idle) {
+        Text(stringResource(when (state.serviceStatus) {
+            Status.Stopped -> R.string.hydra_off
+            Status.Starting -> R.string.hydra_starting
+            Status.Started -> R.string.hydra_on
+            Status.Stopping -> R.string.hydra_stopping
+        }), color = if (active) HydraCyan else HydraText, style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold)
+        Text(state.selectedProfileName ?: stringResource(R.string.hydra_empty), color = HydraMuted)        if (idle) {
             if (editing) {
                 OutlinedTextField(value = link, onValueChange = { link = it }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp)),
@@ -89,7 +107,7 @@ fun HydraHome(state: DashboardUiState, toggle: () -> Unit) {
                 }
             }
             TextButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = !busy) {
-                Text(stringResource(R.string.hydra_file), color = Color(0xffa4dcf0))
+                Text(stringResource(R.string.hydra_file), color = HydraCyan)
             }
         }
         problem?.let { Text(it, color = Color(0xffffb4ab)) }
