@@ -57,7 +57,7 @@ with open("hydra-android-connected.png", "wb") as output:
     subprocess.run(["adb", "exec-out", "screencap", "-p"], stdout=output, check=True)
 # The HTTP listener exists only on the runner's loopback alias, reachable through
 # the test Hysteria2 server. The emulator has no route to it over normal internet.
-reply = adb("shell", "printf 'GET / HTTP/1.0\\r\\n\\r\\n' | toybox nc -w 10 192.0.2.55 8000")
+reply = adb("shell", "(printf 'GET / HTTP/1.0\\r\\n\\r\\n'; sleep 2) | toybox nc -w 10 192.0.2.55 8000")
 if "hydra-vpn-test-ok" not in reply:
     raise RuntimeError("VPN did not return the HTTP fixture")
 tap(label("Disconnect"))

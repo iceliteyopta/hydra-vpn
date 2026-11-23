@@ -1,0 +1,52 @@
+name: Test packaged Hydra on Android
+on:
+  push:
+    branches: [rust-android-port]
+    paths:
+      - 'android/ui-test.*'
+      - '.github/workflows/android-retest.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  android-test:
+
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find the packaged APK for this branch
+        id: artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=Hydra-Mobile&per_page=100" --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_branch == \"$GITHUB_REF_NAME\")] | first.workflow_run.id")
+          test -n "$id"
+          echo "run_id=$id" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          name: Hydra-Mobile
+          path: input
+          run-id: ${{ steps.artifact.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Enable hardware acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          ram-size: 4096M
+          cores: 2
+          emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash android/ui-test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Hydra-Android-test
+          path: |
+            hydra-android-connected.png
+            test-server.log
+            fixture.log

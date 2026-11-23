@@ -3,6 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: [rust-android-port]
+    paths-ignore:
+      - 'android/ui-test.*'
+      - '.github/workflows/android-retest.yml'
 permissions:
   contents: read
 jobs:
