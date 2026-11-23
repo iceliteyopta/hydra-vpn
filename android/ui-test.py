@@ -54,7 +54,18 @@ adb("shell", "am", "start", "-n", PACKAGE + "/io.nekohasekai.sfa.compose.MainAct
 label("Hydra")
 tap(label("Enter Hysteria2 link"))
 tap(wait_for(lambda n: n.get("class") == "android.widget.EditText"))
-adb("shell", "input text 'hy2://hydratest@10.0.2.2:8443?insecure=1#HydraTest'")
+uri = "hy2://hydratest@10.0.2.2:8443?insecure=1#HydraTest"
+# Android's synthetic bulk text events can overrun a cold Compose password field.
+# Wait for the field to reflect the complete URI before saving the profile.
+for attempt in range(3):
+    if attempt:
+        adb("shell", "input keycombination KEYCODE_CTRL_LEFT KEYCODE_A")
+        adb("shell", "input keyevent KEYCODE_DEL")
+    adb("shell", " && ".join("input text '" + char + "' && sleep 0.12" for char in uri))
+    if any(n.get("class") == "android.widget.EditText" and len(n.get("text", "")) == len(uri) for n in nodes()):
+        break
+else:
+    raise RuntimeError("Android did not enter the complete test profile URI")
 adb("shell", "input keyevent KEYCODE_BACK")
 tap(label("Save profile"))
 label("HydraTest")
