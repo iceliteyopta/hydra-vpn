@@ -92,7 +92,8 @@ fun HydraHome(state: DashboardUiState, toggle: () -> Unit) {
             Status.Stopping -> R.string.hydra_stopping
         }), color = if (active) HydraCyan else HydraText, style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold)
-        Text(state.selectedProfileName ?: stringResource(R.string.hydra_empty), color = HydraMuted)        if (idle) {
+        Text(state.selectedProfileName ?: stringResource(R.string.hydra_empty), color = HydraMuted)
+        if (idle) {
             if (editing) {
                 OutlinedTextField(value = link, onValueChange = { link = it }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface, RoundedCornerShape(4.dp)),
