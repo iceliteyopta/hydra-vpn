@@ -98,7 +98,11 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
     val tun = (0 until inboundArray.length()).mapNotNull { inboundArray.optJSONObject(it) }
         .firstOrNull { it.optString("type") == "tun" }
     var outbounds by remember { mutableStateOf((source.optJSONArray("outbounds") ?: JSONArray()).toString()) }
-    val existingTags = tags(JSONArray(outbounds)) + tags(source.optJSONArray("endpoints"))
+    val outArray = JSONArray(outbounds)
+    val tunnels = (0 until outArray.length()).map { outArray.getJSONObject(it) }
+        .filter { it.optString("type") !in setOf("direct", "block", "dns", "selector", "urltest") }
+        .map { it.optString("tag") }.filter { it.isNotBlank() } + tags(source.optJSONArray("endpoints"))
+    val existingTags = tags(outArray) + tags(source.optJSONArray("endpoints"))
     val destinations = (existingTags + "direct").distinct()
     var newTunnel by remember { mutableStateOf(false) }
     var link by remember { mutableStateOf("") }
@@ -154,7 +158,7 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
                         Switch(checked = strict, onCheckedChange = { strict = it })
                     }
                 }
-                RuleComposer(destinations, rules) { rules = it }
+                RuleComposer(destinations, tunnels, rules) { rules = it }
                 TextButton(onClick = { advanced = !advanced }) { Text(stringResource(R.string.hydra_route_rules)) }
                 if (advanced) OutlinedTextField(value = rules, onValueChange = { rules = it },
                     label = { Text(stringResource(R.string.hydra_route_rules)) }, minLines = 3, maxLines = 8)
@@ -212,7 +216,7 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
 }
 
 @Composable
-private fun RuleComposer(destinations: List<String>, rules: String, change: (String) -> Unit) {
+private fun RuleComposer(destinations: List<String>, tunnels: List<String>, rules: String, change: (String) -> Unit) {
     var show by remember { mutableStateOf(false) }
     var protect by remember { mutableStateOf(false) }
     var kind by remember { mutableStateOf("domain_suffix") }
@@ -222,12 +226,12 @@ private fun RuleComposer(destinations: List<String>, rules: String, change: (Str
     var apps by remember { mutableStateOf(emptyList<Pair<String,String>>()) }
     var problem by remember { mutableStateOf<String?>(null) }
     TextButton(onClick = { protect = false; show = !show }) { Text(stringResource(R.string.hydra_add_rule)) }
-    val tunnels = destinations.filter { it != "direct" && it != "block" }
+
     TextButton(enabled = tunnels.isNotEmpty(), onClick = {
         protect = true; show = true; kind = "package_name"; value = ""; dest = tunnels.first()
     }) { Text(stringResource(R.string.hydra_protect)) }
     if (!show) return
-    if (!protect) Choice(stringResource(R.string.hydra_match), kind, listOf("domain_suffix","domain","domain_keyword","ip_cidr","port","package_name")) { kind = it; value = "" }
+    Choice(stringResource(R.string.hydra_match), kind, if (protect) listOf("package_name","domain_suffix","domain","ip_cidr") else listOf("domain_suffix","domain","domain_keyword","ip_cidr","port","package_name")) { kind = it; value = "" }
     if (kind == "package_name") {
         LaunchedEffect(Unit) {
             apps = withContext(Dispatchers.IO) {
