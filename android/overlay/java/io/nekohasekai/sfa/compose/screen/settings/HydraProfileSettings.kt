@@ -82,6 +82,7 @@ fun HydraProfileSettings() {
                 try { context.startActivity(Intent(AndroidSettings.ACTION_VPN_SETTINGS)) }
                 catch (e: Exception) { problem = e.localizedMessage }
             }) { Text(stringResource(R.string.hydra_lockdown)) }
+            HydraMobileOptions()
             problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
@@ -213,15 +214,20 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
 @Composable
 private fun RuleComposer(destinations: List<String>, rules: String, change: (String) -> Unit) {
     var show by remember { mutableStateOf(false) }
+    var protect by remember { mutableStateOf(false) }
     var kind by remember { mutableStateOf("domain_suffix") }
     var value by remember { mutableStateOf("") }
     var dest by remember { mutableStateOf(destinations.firstOrNull().orEmpty()) }
     val context = LocalContext.current
     var apps by remember { mutableStateOf(emptyList<Pair<String,String>>()) }
     var problem by remember { mutableStateOf<String?>(null) }
-    TextButton(onClick = { show = !show }) { Text(stringResource(R.string.hydra_add_rule)) }
+    TextButton(onClick = { protect = false; show = !show }) { Text(stringResource(R.string.hydra_add_rule)) }
+    val tunnels = destinations.filter { it != "direct" && it != "block" }
+    TextButton(enabled = tunnels.isNotEmpty(), onClick = {
+        protect = true; show = true; kind = "package_name"; value = ""; dest = tunnels.first()
+    }) { Text(stringResource(R.string.hydra_protect)) }
     if (!show) return
-    Choice(stringResource(R.string.hydra_match), kind, listOf("domain_suffix","domain","domain_keyword","ip_cidr","port","package_name")) { kind = it; value = "" }
+    if (!protect) Choice(stringResource(R.string.hydra_match), kind, listOf("domain_suffix","domain","domain_keyword","ip_cidr","port","package_name")) { kind = it; value = "" }
     if (kind == "package_name") {
         LaunchedEffect(Unit) {
             apps = withContext(Dispatchers.IO) {
@@ -238,7 +244,7 @@ private fun RuleComposer(destinations: List<String>, rules: String, change: (Str
             TextButton(onClick = { value = app.second }) { Text(app.first + " · " + app.second) }
         }
     }
-    Choice(stringResource(R.string.hydra_default_route), dest, destinations + "block") { dest = it }
+    Choice(stringResource(R.string.hydra_default_route), dest, if (protect) tunnels else destinations + "block") { dest = it }
     TextButton(enabled = value.isNotBlank() && dest.isNotBlank(), onClick = {
         try {
             val values = JSONArray()

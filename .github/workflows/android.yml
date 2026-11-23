@@ -34,10 +34,13 @@ jobs:
       - name: Install Android build packages
         run: JAVA_HOME="$JAVA_HOME_21_X64" "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.0.13004108" "platforms;android-37.1"
       - run: bash android/build.sh
+        env:
+          HYDRA_ANDROID_KEYSTORE: ${{ secrets.HYDRA_ANDROID_KEYSTORE }}
+          HYDRA_ANDROID_PASSWORD: ${{ secrets.HYDRA_ANDROID_PASSWORD }}
       - uses: actions/upload-artifact@v4
         with:
           name: Hydra-Mobile
-          path: mobile/app/build/outputs/apk/other/debug/*universal*.apk
+          path: mobile/app/build/outputs/apk/other/release/*universal*.apk
           if-no-files-found: error
   android-test:
     needs: apk

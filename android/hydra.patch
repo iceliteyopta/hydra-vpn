@@ -27,10 +27,85 @@ index 85b7869..a8ba5e9 100644
      }
  
 diff --git a/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt b/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt
-index 11174c0..3fb84b5 100644
+index 11174c0..f191b60 100644
 --- a/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt
 +++ b/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt
-@@ -404,7 +404,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+@@ -79,6 +79,49 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+     private val notification = ServiceNotification(status, service)
+     private lateinit var commandServer: CommandServer
+     private val idleModeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
++    private val timeoutHistory = mutableMapOf<String, java.util.ArrayDeque<Long>>()
++    private var nextRecovery = 0L
++    private var tunnelTags = emptySet<String>()
++    private val recoveryClient = io.nekohasekai.sfa.utils.CommandClient(idleModeScope,
++        io.nekohasekai.sfa.utils.CommandClient.ConnectionType.Log,
++        object : io.nekohasekai.sfa.utils.CommandClient.Handler {
++            override fun appendLogs(message: List<io.nekohasekai.libbox.LogEntry>) {
++                val now = android.os.SystemClock.elapsedRealtime()
++                synchronized(timeoutHistory) {
++                    if (now < nextRecovery || status.value != Status.Started ||
++                        !service.getSharedPreferences("hydra", 0).getBoolean("recover", true)) return
++                    for (entry in message) {
++                        val line = entry.message
++                        if (!line.contains("i/o timeout") && !line.contains("timed out")) continue
++                        val tag = tunnelTags.firstOrNull { line.contains("[$it]") } ?: continue
++                        val times = timeoutHistory.getOrPut(tag) { java.util.ArrayDeque<Long>() }
++                        while (!times.isEmpty() && now - times.first > 60_000) times.removeFirst()
++                        times.addLast(now)
++                        if (times.size >= 5) {
++                            timeoutHistory.clear()
++                            nextRecovery = now + 180_000
++                            idleModeScope.launch {
++                                if (status.value == Status.Started) serviceReload0()
++                            }
++                            break
++                        }
++                    }
++                }
++            }
++        }, localOnly = true)
++    private fun watchTunnels(content: String) {
++        val config = org.json.JSONObject(content)
++        val tags = mutableSetOf<String>()
++        for (key in listOf("outbounds", "endpoints")) {
++            val array = config.optJSONArray(key) ?: continue
++            for (i in 0 until array.length()) {
++                val item = array.optJSONObject(i) ?: continue
++                if (item.optString("type") in listOf("direct","block","dns","selector","urltest")) continue
++                item.optString("tag").takeIf { it.isNotBlank() }?.let { tags.add(it) }
++            }
++        }
++        synchronized(timeoutHistory) { tunnelTags = tags; timeoutHistory.clear() }
++    }
+     private val idleModeUpdates = Channel<Boolean>(Channel.UNLIMITED)
+ 
+     init {
+@@ -188,6 +231,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+                 notification.show(lastProfileName, R.string.status_started)
+             }
+             notification.start()
++            watchTunnels(content)
++            recoveryClient.connect()
+         } catch (e: Exception) {
+             stopAndAlert(Alert.StartService, e.message)
+             return
+@@ -288,6 +333,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+     private fun stopService() {
+         if (status.value != Status.Started) return
+         status.value = Status.Stopping
++        recoveryClient.disconnect()
+         if (receiverRegistered) {
+             service.unregisterReceiver(receiver)
+             receiverRegistered = false
+@@ -390,6 +436,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+     internal fun onBind(): IBinder = binder
+ 
+     internal fun onDestroy() {
++        recoveryClient.disconnect()
+         idleModeUpdates.cancel()
+         idleModeScope.cancel()
+         binder.close()
+@@ -404,7 +451,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
          val builder =
              NotificationCompat.Builder(service, channel).setShowWhen(false)
                  .setContentTitle(notification.title).setContentText(notification.body)
@@ -64,7 +139,7 @@ index c111d63..e18ed58 100644
          )
      }
 diff --git a/app/src/main/java/io/nekohasekai/sfa/compose/MainActivity.kt b/app/src/main/java/io/nekohasekai/sfa/compose/MainActivity.kt
-index 3999e3f..b41dfbd 100644
+index 3999e3f..cb9bc96 100644
 --- a/app/src/main/java/io/nekohasekai/sfa/compose/MainActivity.kt
 +++ b/app/src/main/java/io/nekohasekai/sfa/compose/MainActivity.kt
 @@ -235,17 +235,7 @@ class MainActivity :
@@ -86,7 +161,15 @@ index 3999e3f..b41dfbd 100644
  
              handleIntent(intent)
  
-@@ -635,55 +625,6 @@ class MainActivity :
+@@ -386,6 +376,7 @@ class MainActivity :
+     @OptIn(ExperimentalMaterial3Api::class)
+     @Composable
+     fun App() {
++        io.nekohasekai.sfa.compose.screen.settings.HydraReleaseCheck()
+         val navController = rememberNavController()
+         val navBackStackEntry by navController.currentBackStackEntryAsState()
+         val currentDestination = navBackStackEntry?.destination
+@@ -635,55 +626,6 @@ class MainActivity :
              )
          }
  

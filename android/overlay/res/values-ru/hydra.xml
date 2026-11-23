@@ -27,4 +27,12 @@
     <string name="hydra_match">Тип правила</string>
     <string name="hydra_find_app">Найти приложение</string>
     <string name="hydra_dns_servers">Изменить DNS-серверы</string>
+    <string name="hydra_protect">Обязательный туннель для приложения</string>
+    <string name="hydra_recover">Переподключение при тайм-аутах туннеля</string>
+    <string name="hydra_updates">Проверять GitHub при запуске</string>
+    <string name="hydra_check">Проверить обновления</string>
+    <string name="hydra_new">Доступен новый APK Hydra.</string>
+    <string name="hydra_latest">Установлена актуальная версия Hydra.</string>
+    <string name="hydra_check_failed">Не удалось проверить GitHub.</string>
+    <string name="hydra_download">Скачать APK</string>
 </resources>

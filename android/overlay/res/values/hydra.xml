@@ -27,4 +27,12 @@
     <string name="hydra_match">Match by</string>
     <string name="hydra_find_app">Find an app</string>
     <string name="hydra_dns_servers">Edit DNS servers</string>
+    <string name="hydra_protect">Require tunnel for an app</string>
+    <string name="hydra_recover">Reconnect after repeated tunnel timeouts</string>
+    <string name="hydra_updates">Check GitHub on startup</string>
+    <string name="hydra_check">Check for update</string>
+    <string name="hydra_new">A new Hydra APK is available.</string>
+    <string name="hydra_latest">Hydra is up to date.</string>
+    <string name="hydra_check_failed">Could not check GitHub.</string>
+    <string name="hydra_download">Download APK</string>
 </resources>

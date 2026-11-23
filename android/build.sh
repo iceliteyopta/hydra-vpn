@@ -14,9 +14,12 @@ cargo build --manifest-path rust/Cargo.toml --locked --release --target aarch64-
 install -Dm755 rust/target/aarch64-linux-android/release/libhydra_routing.so mobile/app/src/main/jniLibs/arm64-v8a/libhydra_import.so
 (cd engine && make lib_install && go run ./cmd/internal/build_libbox -target android -platform android/arm64,android/amd64)
 install -Dm644 engine/libbox.aar mobile/app/libs/libbox.aar
-(cd mobile && ./gradlew :app:assembleOtherDebug)
+sed -i 's/^VERSION_CODE=.*/VERSION_CODE=2500/; s/^VERSION_NAME=.*/VERSION_NAME=2.5.0/' mobile/version.properties
+printf '%s' "$HYDRA_ANDROID_KEYSTORE" | base64 -d > mobile/app/release.keystore
+export LOCAL_PROPERTIES=$(printf 'KEYSTORE_PASS=%s\nALIAS_NAME=hydra\nALIAS_PASS=%s\n' "$HYDRA_ANDROID_PASSWORD" "$HYDRA_ANDROID_PASSWORD" | base64 -w0)
+(cd mobile && ./gradlew :app:assembleOtherRelease)
 
-apk=$(find mobile/app/build/outputs/apk/other/debug -name '*universal*.apk' -print -quit)
+apk=$(find mobile/app/build/outputs/apk/other/release -name '*universal*.apk' -print -quit)
 aapt=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
 "$aapt" dump badging "$apk" > labels.txt
 grep -q "^application-label:'Hydra'$" labels.txt
