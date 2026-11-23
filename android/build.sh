@@ -5,6 +5,7 @@ export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.0.13004108"
 export PATH="$PATH:$(go env GOPATH)/bin"
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android24-clang"
 git -C mobile apply "$root/android/hydra.patch"
+cp -R android/overlay/. mobile/app/src/main/
 rustup target add aarch64-linux-android
 cargo build --manifest-path rust/Cargo.toml --locked --release --target aarch64-linux-android --bin hydra-import
 install -Dm755 rust/target/aarch64-linux-android/release/hydra-import mobile/app/src/main/jniLibs/arm64-v8a/libhydra_import.so

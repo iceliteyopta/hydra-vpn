@@ -1,16 +1,22 @@
 diff --git a/app/build.gradle.kts b/app/build.gradle.kts
-index 85b7869..f51d505 100644
+index 85b7869..2fe9f31 100644
 --- a/app/build.gradle.kts
 +++ b/app/build.gradle.kts
-@@ -68,7 +68,7 @@ android {
+@@ -68,12 +68,12 @@ android {
      }
  
      defaultConfig {
 -        applicationId = "io.nekohasekai.sfa"
-+        applicationId = "io.github.iceliteyopta.hydra"
++        applicationId = "io.github.iceliteyopta.hydra.vpn"
          minSdk = 24
          targetSdk = 37
          versionCode = getVersionProps("VERSION_CODE").toInt()
+         versionName = getVersionProps("VERSION_NAME")
+-        base.archivesName.set("SFA-${versionName}")
++        base.archivesName.set("Hydra-${versionName}")
+     }
+ 
+     signingConfigs {
 @@ -132,7 +132,7 @@ android {
              isEnable = true
              isUniversalApk = true
@@ -20,6 +26,122 @@ index 85b7869..f51d505 100644
          }
      }
  
+diff --git a/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt b/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt
+index 11174c0..3fb84b5 100644
+--- a/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt
++++ b/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt
+@@ -404,7 +404,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+         val builder =
+             NotificationCompat.Builder(service, channel).setShowWhen(false)
+                 .setContentTitle(notification.title).setContentText(notification.body)
+-                .setOnlyAlertOnce(true).setSmallIcon(R.drawable.ic_menu)
++                .setOnlyAlertOnce(true).setSmallIcon(R.drawable.hydra_status)
+                 .setCategory(NotificationCompat.CATEGORY_EVENT)
+                 .setPriority(NotificationCompat.PRIORITY_HIGH).setAutoCancel(true)
+         if (!notification.subtitle.isNullOrBlank()) {
+diff --git a/app/src/main/java/io/nekohasekai/sfa/bg/ServiceNotification.kt b/app/src/main/java/io/nekohasekai/sfa/bg/ServiceNotification.kt
+index c111d63..e18ed58 100644
+--- a/app/src/main/java/io/nekohasekai/sfa/bg/ServiceNotification.kt
++++ b/app/src/main/java/io/nekohasekai/sfa/bg/ServiceNotification.kt
+@@ -51,8 +51,8 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
+ 
+     private val notificationBuilder by lazy {
+         NotificationCompat.Builder(service, notificationChannel).setShowWhen(false).setOngoing(true)
+-            .setContentTitle("sing-box").setOnlyAlertOnce(true)
+-            .setSmallIcon(R.drawable.ic_menu)
++            .setContentTitle("Hydra").setOnlyAlertOnce(true)
++            .setSmallIcon(R.drawable.hydra_status)
+             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+             .setContentIntent(
+                 PendingIntent.getActivity(
+@@ -94,7 +94,7 @@ class ServiceNotification(private val status: MutableLiveData<Status>, private v
+         service.startForeground(
+             notificationId,
+             notificationBuilder
+-                .setContentTitle(lastProfileName.takeIf { it.isNotBlank() } ?: "sing-box")
++                .setContentTitle(lastProfileName.takeIf { it.isNotBlank() } ?: "Hydra")
+                 .setContentText(service.getString(contentTextId)).build(),
+         )
+     }
+diff --git a/app/src/main/java/io/nekohasekai/sfa/compose/MainActivity.kt b/app/src/main/java/io/nekohasekai/sfa/compose/MainActivity.kt
+index 3999e3f..b41dfbd 100644
+--- a/app/src/main/java/io/nekohasekai/sfa/compose/MainActivity.kt
++++ b/app/src/main/java/io/nekohasekai/sfa/compose/MainActivity.kt
+@@ -235,17 +235,7 @@ class MainActivity :
+             connection.reconnect()
+             RemoteControlManager.restore()
+ 
+-            UpdateState.loadFromCache()
+-            if (Settings.checkUpdateEnabled) {
+-                lifecycleScope.launch(Dispatchers.IO) {
+-                    try {
+-                        val updateInfo = Vendor.checkUpdateAsync()
+-                        UpdateState.setUpdate(updateInfo)
+-                    } catch (_: Exception) {
+-                        UpdateState.setUpdate(null)
+-                    }
+-                }
+-            }
++            UpdateState.setUpdate(null)
+ 
+             handleIntent(intent)
+ 
+@@ -635,55 +625,6 @@ class MainActivity :
+             )
+         }
+ 
+-        // Handle update check prompt dialog (shown only once on first launch)
+-        var showUpdateCheckPrompt by remember { mutableStateOf(!Settings.updateCheckPrompted) }
+-        if (showUpdateCheckPrompt) {
+-            AlertDialog(
+-                onDismissRequest = {
+-                    Settings.updateCheckPrompted = true
+-                    showUpdateCheckPrompt = false
+-                },
+-                title = { Text(stringResource(R.string.check_update)) },
+-                text = {
+-                    MarkdownText(
+-                        markdown = stringResource(
+-                            if (BuildConfig.FLAVOR == "play") {
+-                                R.string.check_update_prompt_play
+-                            } else {
+-                                R.string.check_update_prompt_github
+-                            },
+-                        ),
+-                        style = MaterialTheme.typography.bodyMedium,
+-                    )
+-                },
+-                confirmButton = {
+-                    TextButton(onClick = {
+-                        Settings.updateCheckPrompted = true
+-                        Settings.checkUpdateEnabled = true
+-                        showUpdateCheckPrompt = false
+-                        scope.launch(Dispatchers.IO) {
+-                            try {
+-                                val result = Vendor.checkUpdateAsync()
+-                                UpdateState.setUpdate(result)
+-                            } catch (_: Exception) {
+-                                UpdateState.setUpdate(null)
+-                            }
+-                        }
+-                    }) {
+-                        Text(stringResource(R.string.ok))
+-                    }
+-                },
+-                dismissButton = {
+-                    TextButton(onClick = {
+-                        Settings.updateCheckPrompted = true
+-                        showUpdateCheckPrompt = false
+-                    }) {
+-                        Text(stringResource(R.string.no_thanks))
+-                    }
+-                },
+-            )
+-        }
+-
+         // Handle update available dialog
+         val updateInfo by UpdateState.updateInfo
+         val shouldShowUpdateDialog = updateInfo != null &&
 diff --git a/app/src/main/java/io/nekohasekai/sfa/compose/screen/configuration/ProfileImportHandler.kt b/app/src/main/java/io/nekohasekai/sfa/compose/screen/configuration/ProfileImportHandler.kt
 index 9194b87..b46c9fa 100644
 --- a/app/src/main/java/io/nekohasekai/sfa/compose/screen/configuration/ProfileImportHandler.kt
@@ -88,6 +210,63 @@ index 9194b87..b46c9fa 100644
              // Check if it's a sing-box remote profile import link
              if (data.startsWith("sing-box://import-remote-profile")) {
                  try {
+diff --git a/app/src/main/java/io/nekohasekai/sfa/compose/screen/dashboard/DashboardScreen.kt b/app/src/main/java/io/nekohasekai/sfa/compose/screen/dashboard/DashboardScreen.kt
+index 78d08d1..5fe6ca9 100644
+--- a/app/src/main/java/io/nekohasekai/sfa/compose/screen/dashboard/DashboardScreen.kt
++++ b/app/src/main/java/io/nekohasekai/sfa/compose/screen/dashboard/DashboardScreen.kt
+@@ -65,7 +65,7 @@ fun DashboardScreen(
+ 
+     OverrideTopBar {
+         TopAppBar(
+-            title = { Text(stringResource(R.string.title_dashboard)) },
++            title = { Text(stringResource(R.string.app_name)) },
+             actions = {
+                 Box {
+                     IconButton(onClick = { showOthersMenu = true }) {
+@@ -153,6 +153,7 @@ fun DashboardScreen(
+             verticalArrangement = Arrangement.spacedBy(16.dp),
+             contentPadding = PaddingValues(bottom = bottomPadding),
+         ) {
++            if (!isRemote) item { HydraHome(uiState, viewModel::toggleService) }
+             // Dynamic dashboard cards
+             // Show cards when service is running OR if it's the Profiles card (always available)
+             val serviceRunning = uiState.isStatusVisible
+diff --git a/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml b/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+index c78bee3..3f2e87c 100644
+--- a/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
++++ b/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+     <background android:drawable="@color/ic_launcher_background" />
+-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+-    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
++    <foreground android:drawable="@drawable/hydra_adaptive" />
++    <monochrome android:drawable="@drawable/hydra_status" />
+ </adaptive-icon>
+diff --git a/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml b/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+index c78bee3..3f2e87c 100644
+--- a/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
++++ b/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+     <background android:drawable="@color/ic_launcher_background" />
+-    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+-    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
++    <foreground android:drawable="@drawable/hydra_adaptive" />
++    <monochrome android:drawable="@drawable/hydra_status" />
+ </adaptive-icon>
+diff --git a/app/src/main/res/values/ic_launcher_background.xml b/app/src/main/res/values/ic_launcher_background.xml
+index 9fe034e..6b9c032 100644
+--- a/app/src/main/res/values/ic_launcher_background.xml
++++ b/app/src/main/res/values/ic_launcher_background.xml
+@@ -1,4 +1,4 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <color name="ic_launcher_background">#ECEFF1</color>
++    <color name="ic_launcher_background">#101528</color>
+ </resources>
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
 index fa24713..30476cf 100644
 --- a/app/src/main/res/values/strings.xml
@@ -101,3 +280,32 @@ index fa24713..30476cf 100644
      <string name="app_version_title">App version</string>
      <string name="language">Language</string>
      <string name="system_default">System default</string>
+diff --git a/app/src/other/java/io/nekohasekai/sfa/vendor/Vendor.kt b/app/src/other/java/io/nekohasekai/sfa/vendor/Vendor.kt
+index fa39ea9..1bcf09a 100644
+--- a/app/src/other/java/io/nekohasekai/sfa/vendor/Vendor.kt
++++ b/app/src/other/java/io/nekohasekai/sfa/vendor/Vendor.kt
+@@ -95,24 +95,6 @@ object Vendor : VendorInterface {
+         onCropArea: ((QRCodeCropArea?) -> Unit)?,
+     ): ImageAnalysis.Analyzer? = null
+ 
+-    override val hasCustomUpdate = true
+-
+-    override val updateSources = listOf(UpdateSource.GITHUB, UpdateSource.FDROID)
+-
+-    override fun checkUpdateAsync(): UpdateInfo? = when (UpdateSource.fromString(Settings.updateSource)) {
+-        UpdateSource.FDROID -> checkFDroidUpdate(Application.application)
+-        UpdateSource.GITHUB -> {
+-            val track = UpdateTrack.fromString(Settings.updateTrack)
+-            GitHubUpdateChecker().use { checker ->
+-                checker.checkUpdate(track, Settings.githubToken)
+-            }
+-        }
+-    }
+-
+-    override fun scheduleAutoUpdate() {
+-        UpdateWorker.schedule(io.nekohasekai.sfa.Application.application)
+-    }
+-
+     override suspend fun verifySilentInstallMethod(method: String): Boolean {
+         return when (method) {
+             "PACKAGE_INSTALLER" -> {

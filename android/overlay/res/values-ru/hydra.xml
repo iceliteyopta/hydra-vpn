@@ -1,0 +1,12 @@
+<resources>
+    <string name="hydra_off">Отключено</string>
+    <string name="hydra_on">Подключено</string>
+    <string name="hydra_starting">Подключение…</string>
+    <string name="hydra_stopping">Отключение…</string>
+    <string name="hydra_connect">Подключить</string>
+    <string name="hydra_disconnect">Отключить</string>
+    <string name="hydra_empty">Добавь профиль для подключения.</string>
+    <string name="hydra_link">Ввести ссылку Hysteria2</string>
+    <string name="hydra_file">Открыть файл профиля</string>
+    <string name="hydra_add">Сохранить профиль</string>
+</resources>

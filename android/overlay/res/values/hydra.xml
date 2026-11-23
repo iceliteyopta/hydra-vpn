@@ -1,0 +1,12 @@
+<resources>
+    <string name="hydra_off">Disconnected</string>
+    <string name="hydra_on">Connected</string>
+    <string name="hydra_starting">Connecting…</string>
+    <string name="hydra_stopping">Disconnecting…</string>
+    <string name="hydra_connect">Connect</string>
+    <string name="hydra_disconnect">Disconnect</string>
+    <string name="hydra_empty">Add a VPN profile to connect.</string>
+    <string name="hydra_link">Enter Hysteria2 link</string>
+    <string name="hydra_file">Open profile file</string>
+    <string name="hydra_add">Save profile</string>
+</resources>
