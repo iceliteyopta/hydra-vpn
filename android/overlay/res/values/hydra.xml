@@ -26,4 +26,5 @@
     <string name="hydra_add_rule">Add routing rule</string>
     <string name="hydra_match">Match by</string>
     <string name="hydra_find_app">Find an app</string>
+    <string name="hydra_dns_servers">Edit DNS servers</string>
 </resources>

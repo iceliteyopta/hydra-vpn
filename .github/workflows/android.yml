@@ -68,5 +68,6 @@ jobs:
           name: Hydra-Android-test
           path: |
             hydra-android-connected.png
+            hydra-android-settings.png
             test-server.log
             fixture.log

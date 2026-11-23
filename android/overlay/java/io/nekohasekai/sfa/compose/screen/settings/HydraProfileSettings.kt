@@ -105,6 +105,8 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
     val hasRemoteSets = (0 until (remoteSets?.length() ?: 0)).any { remoteSets?.optJSONObject(it)?.optString("type") == "remote" }
     var setVia by remember { mutableStateOf("") }
     var final by remember { mutableStateOf(route?.optString("final").orEmpty()) }
+    var dnsServers by remember { mutableStateOf((dns?.optJSONArray("servers") ?: JSONArray()).toString(2)) }
+    var editDns by remember { mutableStateOf(false) }
     var resolver by remember { mutableStateOf(dns?.optString("final").orEmpty()) }
     var level by remember { mutableStateOf(source.optJSONObject("log")?.optString("level","info") ?: "info") }
     var strict by remember { mutableStateOf(tun?.optBoolean("strict_route") ?: false) }
@@ -139,7 +141,10 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
                     }) { Text(stringResource(R.string.hydra_add)) }
                 }
                 Choice(stringResource(R.string.hydra_default_route), final, listOf("") + destinations) { final = it }
-                Choice(stringResource(R.string.hydra_default_dns), resolver, listOf("") + tags(dns?.optJSONArray("servers"))) { resolver = it }
+                Choice(stringResource(R.string.hydra_default_dns), resolver, listOf("") + runCatching { tags(JSONArray(dnsServers)) }.getOrDefault(emptyList())) { resolver = it }
+                TextButton(onClick = { editDns = !editDns }) { Text(stringResource(R.string.hydra_dns_servers)) }
+                if (editDns) OutlinedTextField(value = dnsServers, onValueChange = { dnsServers = it },
+                    label = { Text("DNS · JSON") }, minLines = 3, maxLines = 8)
                 if (hasRemoteSets) Choice(stringResource(R.string.hydra_rules_via), setVia, listOf("") + destinations) { setVia = it }
                 Choice(stringResource(R.string.hydra_log_level), level, listOf("trace","debug","info","warn","error","fatal","panic")) { level = it }
                 if (tun != null) {
@@ -179,6 +184,8 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
                                 if (set?.optString("type") == "remote") set.put("download_detour", setVia)
                             }
                         }
+                        if (dnsServers != (dns?.optJSONArray("servers") ?: JSONArray()).toString(2))
+                            updated.section("dns").put("servers", JSONArray(dnsServers))
                         if (resolver.isNotBlank()) updated.section("dns").put("final",resolver)
                         else updated.optJSONObject("dns")?.remove("final")
                         updated.section("log").put("level",level)

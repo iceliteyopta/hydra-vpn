@@ -70,3 +70,23 @@ if "hydra-vpn-test-ok" not in reply:
     raise RuntimeError("VPN did not return the HTTP fixture")
 tap(label("Disconnect"))
 label("Disconnected")
+
+tap(label("Settings"))
+tap(label("Edit active profile"))
+# On compact displays the log selector sits below the route and DNS choices.
+for _ in range(5):
+    info = next((n for n in nodes() if n.get("text") == "info"), None)
+    if info is not None:
+        break
+    adb("shell", "input swipe 520 1300 520 820 400")
+tap(label("info"))
+tap(label("debug"))
+tap(label("Save"))
+tap(label("Edit active profile"))
+for _ in range(5):
+    if any(n.get("text") == "debug" for n in nodes()):
+        break
+    adb("shell", "input swipe 520 1300 520 820 400")
+label("debug")
+with open("hydra-android-settings.png", "wb") as output:
+    subprocess.run(["adb", "exec-out", "screencap", "-p"], stdout=output, check=True)

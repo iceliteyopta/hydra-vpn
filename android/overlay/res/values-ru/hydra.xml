@@ -26,4 +26,5 @@
     <string name="hydra_add_rule">Добавить правило</string>
     <string name="hydra_match">Тип правила</string>
     <string name="hydra_find_app">Найти приложение</string>
+    <string name="hydra_dns_servers">Изменить DNS-серверы</string>
 </resources>
