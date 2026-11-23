@@ -66,8 +66,8 @@ mod desktop {
     }
     fn choose() -> io::Result<Option<PathBuf>> {
         let mut buffer = vec![0u16; 32768];
-        let filter = wide("sing-box (*.json)\0*.json\0".as_ref());
-        let title = wide("Выбери конфигурацию sing-box".as_ref());
+        let filter = wide("Hydra (*.json, *.txt)\0*.json;*.txt\0".as_ref());
+        let title = wide("Выбери JSON sing-box или файл со ссылкой Hysteria2".as_ref());
         let mut dialog: OpenFile = unsafe { mem::zeroed() };
         dialog.size = mem::size_of::<OpenFile>() as u32;
         dialog.file = buffer.as_mut_ptr();
@@ -98,6 +98,134 @@ mod desktop {
         cmd
     }
 
+    fn spawn_core(
+        core: &Path,
+        config: &Path,
+        action: &str,
+        generated: Option<&[u8]>,
+    ) -> io::Result<Child> {
+        use io::Write;
+        let mut cmd = if generated.is_some() {
+            let mut cmd = Command::new(core);
+            cmd.arg(action)
+                .args(["-c", "stdin"])
+                .current_dir(config.parent().unwrap())
+                .creation_flags(0x08000000);
+            cmd
+        } else {
+            command(core, config, action)
+        };
+        if action == "check" {
+            cmd.stderr(Stdio::piped());
+        }
+        cmd.stdin(if generated.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        });
+        let mut child = cmd.spawn()?;
+        if let Some(bytes) = generated {
+            if let Err(err) = child.stdin.take().unwrap().write_all(bytes) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(err);
+            }
+        }
+        Ok(child)
+    }
+    #[repr(C)]
+    struct Blob {
+        size: u32,
+        data: *mut u8,
+    }
+    #[link(name = "crypt32")]
+    unsafe extern "system" {
+        fn CryptStringToBinaryW(
+            text: *const u16,
+            len: u32,
+            flags: u32,
+            data: *mut u8,
+            size: *mut u32,
+            skip: *mut u32,
+            kind: *mut u32,
+        ) -> i32;
+        fn CryptUnprotectData(
+            input: *const Blob,
+            desc: *mut *mut u16,
+            entropy: *const Blob,
+            reserved: *mut c_void,
+            prompt: *mut c_void,
+            flags: u32,
+            output: *mut Blob,
+        ) -> i32;
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn LocalFree(ptr: *mut c_void) -> *mut c_void;
+    }
+    fn unprotect(encoded: &str) -> Result<String, String> {
+        let text = wide(encoded.as_ref());
+        let len = u32::try_from(text.len() - 1).map_err(|_| "Invalid protected password")?;
+        let mut size = 0;
+        unsafe {
+            if CryptStringToBinaryW(
+                text.as_ptr(),
+                len,
+                1,
+                ptr::null_mut(),
+                &mut size,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            ) == 0
+            {
+                return Err("Invalid protected password".into());
+            }
+            let mut bytes = vec![0u8; size as usize];
+            if CryptStringToBinaryW(
+                text.as_ptr(),
+                len,
+                1,
+                bytes.as_mut_ptr(),
+                &mut size,
+                ptr::null_mut(),
+                ptr::null_mut(),
+            ) == 0
+            {
+                return Err("Invalid protected password".into());
+            }
+            let input = Blob {
+                size,
+                data: bytes.as_mut_ptr(),
+            };
+            let mut output = Blob {
+                size: 0,
+                data: ptr::null_mut(),
+            };
+            if CryptUnprotectData(
+                &input,
+                ptr::null_mut(),
+                ptr::null(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                1,
+                &mut output,
+            ) == 0
+            {
+                return Err("Windows could not unlock the profile password".into());
+            }
+            let result = if output.size == 0 {
+                Ok(String::new())
+            } else {
+                let plain = std::slice::from_raw_parts_mut(output.data, output.size as usize);
+                let result = String::from_utf8(plain.to_vec())
+                    .map_err(|_| "Invalid password encoding".to_string());
+                plain.fill(0);
+                result
+            };
+            LocalFree(output.data.cast());
+            result
+        }
+    }
     struct Session(Child);
     impl Drop for Session {
         fn drop(&mut self) {
@@ -119,19 +247,51 @@ mod desktop {
             return Ok(());
         };
         let config = config.canonicalize()?;
-        let checked = command(&core, &config, "check").output()?;
+        let generated = if config
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("txt"))
+        {
+            let text = std::fs::read_to_string(&config)?;
+            Some(serde_json::to_vec(&hydra_routing::hysteria::config(
+                text.trim_start_matches('\u{feff}'),
+            )?)?)
+        } else {
+            None
+        };
+        let mut protected = false;
+        let generated = if generated.is_none()
+            && config
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+        {
+            let raw = std::fs::read_to_string(&config)?;
+            let value: serde_json::Value =
+                serde_json::from_str(raw.trim_start_matches('\u{feff}'))?;
+            if value.get("Tunnels").is_some() {
+                let profile: hydra_routing::profile::Profile = serde_json::from_value(value)?;
+                protected = profile.kill_switch;
+                Some(serde_json::to_vec(
+                    &profile.config(config.parent().unwrap(), unprotect)?,
+                )?)
+            } else {
+                None
+            }
+        } else {
+            generated
+        };
+        let checked =
+            spawn_core(&core, &config, "check", generated.as_deref())?.wait_with_output()?;
         if !checked.status.success() {
             return Err(String::from_utf8_lossy(&checked.stderr).into_owned().into());
         }
         if check_only {
             return Ok(());
         }
+        if protected {
+            return Err("В профиле включена защита брандмауэром. Для подключения этого профиля пока используй основную Hydra.".into());
+        }
         if message("Запустить sing-box с выбранной конфигурацией? Защита приложений брандмауэром в этой сборке ещё недоступна.", 4 | 0x20) != 6 { return Ok(()); }
-        let mut session = Session(
-            command(&core, &config, "run")
-                .stdin(Stdio::null())
-                .spawn()?,
-        );
+        let mut session = Session(spawn_core(&core, &config, "run", generated.as_deref())?);
         loop {
             if let Some(status) = session.0.try_wait()? {
                 return Err(format!("sing-box завершился ({status})").into());

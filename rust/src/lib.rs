@@ -34,7 +34,7 @@ pub fn compile(rules: &[Rule], tags: &[String], platform: Platform) -> Result<Ve
         let mut values = Vec::new();
         for raw in rule.values.split(|c: char| {
             matches!(c, ',' | ';' | '\n' | '\r')
-                || (kind != "process_name" && c.is_ascii_whitespace())
+                || (!matches!(kind, "process_name" | "process_folder") && c.is_ascii_whitespace())
         }) {
             let raw = raw.trim();
             if raw.is_empty() {
@@ -84,6 +84,28 @@ pub fn compile(rules: &[Rule], tags: &[String], platform: Platform) -> Result<Ve
                         format!("{raw}.exe")
                     })
                 }
+                "geosite" | "geoip" => json!(format!("{kind}-{}", raw.to_lowercase())),
+                "process_folder" if platform == Platform::Windows => {
+                    let mut folder = raw.trim_matches('"').to_owned();
+                    for (key, value) in std::env::vars() {
+                        let needle = format!("%{key}%");
+                        if let Some(index) = folder
+                            .to_ascii_lowercase()
+                            .find(&needle.to_ascii_lowercase())
+                        {
+                            folder.replace_range(index..index + needle.len(), &value);
+                        }
+                    }
+                    let mut regex = String::from("(?i)^");
+                    for ch in folder.trim_end_matches(['/', '\\']).chars() {
+                        if r"\.+*?()|[]{}^$".contains(ch) {
+                            regex.push('\\');
+                        }
+                        regex.push(ch);
+                    }
+                    regex.push_str(r"\\");
+                    json!(regex)
+                }
                 "package_name" if platform == Platform::Android => json!(raw),
                 _ => return Err(format!("Unsupported rule: {kind}")),
             });
@@ -91,7 +113,12 @@ pub fn compile(rules: &[Rule], tags: &[String], platform: Platform) -> Result<Ve
         if values.is_empty() {
             continue;
         }
-        matcher[kind] = json!(values);
+        let field = match kind {
+            "geosite" | "geoip" => "rule_set",
+            "process_folder" => "process_path_regex",
+            _ => kind,
+        };
+        matcher[field] = json!(values);
         if rule.target == "block" {
             matcher["action"] = json!("reject");
         } else {
@@ -146,3 +173,6 @@ mod tests {
         assert!(compile(&[rule("port", "65536", "direct")], &[], Platform::Windows).is_err());
     }
 }
+pub mod hysteria;
+pub mod openvpn;
+pub mod profile;
