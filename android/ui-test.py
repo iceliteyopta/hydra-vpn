@@ -39,7 +39,7 @@ def tap(node):
 
 
 def label(name):
-    return wait_for(lambda n: n.get("text") == name)
+    return wait_for(lambda n: n.get("text") == name and n.get("package") == PACKAGE)
 
 
 adb("shell", "am", "start", "-n", PACKAGE + "/io.nekohasekai.sfa.compose.MainActivity")
