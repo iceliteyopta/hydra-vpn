@@ -140,5 +140,40 @@ tap(label("Edit active profile"))
 tap(scroll_to("Ordered rules (JSON)"))
 wait_for(lambda n: "example.org" in n.get("text", "") and "domain_suffix" in n.get("text", ""))
 adb("shell", "input keyevent KEYCODE_BACK")
+# Give the emulator a deterministic route to public GitHub through the runner.
+# Android still performs TLS verification against api.github.com.
+import select
+import socket
+import socketserver
+import threading
+
+class GithubConnect(socketserver.StreamRequestHandler):
+    def handle(self):
+        request = self.rfile.readline(4096).split()
+        while self.rfile.readline(4096).strip():
+            pass
+        if request[:2] != [b"CONNECT", b"api.github.com:443"]:
+            self.wfile.write(b"HTTP/1.1 403 Forbidden\r\n\r\n")
+            return
+        with socket.create_connection(("api.github.com", 443), timeout=10) as upstream:
+            self.wfile.write(b"HTTP/1.1 200 Connection established\r\n\r\n")
+            peers = [self.connection, upstream]
+            while True:
+                ready, _, _ = select.select(peers, [], [], 12)
+                if not ready:
+                    return
+                for peer in ready:
+                    data = peer.recv(65536)
+                    if not data:
+                        return
+                    peers[1 - peers.index(peer)].sendall(data)
+
+proxy = socketserver.ThreadingTCPServer(("127.0.0.1", 0), GithubConnect)
+proxy.daemon_threads = True
+threading.Thread(target=proxy.serve_forever, daemon=True).start()
+port = str(proxy.server_address[1])
+adb("reverse", "tcp:" + port, "tcp:" + port)
+adb("shell", "settings", "put", "global", "http_proxy", "127.0.0.1:" + port)
+time.sleep(2)
 tap(scroll_to("Check for update"))
 label("Hydra is up to date.")
