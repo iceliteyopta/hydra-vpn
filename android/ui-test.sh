@@ -14,5 +14,12 @@ http_pid=$!
 "./$engine/sing-box" run -c test-server.json > test-server.log 2>&1 &
 vpn_pid=$!
 trap 'kill "$vpn_pid" "$http_pid" 2>/dev/null || true' EXIT
+adb shell settings put secure show_first_crash_dialog 0
 adb install -g input/*.apk
-python3 android/ui-test.py
+adb logcat -c
+if ! python3 android/ui-test.py; then
+    adb logcat -b crash -d | tail -200
+    adb shell dumpsys activity activities | grep -E "mResumed|topResumed" || true
+    adb logcat -d -s AndroidRuntime:E DEBUG:E libc:F | tail -150
+    exit 1
+fi
