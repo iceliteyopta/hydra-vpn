@@ -10,7 +10,8 @@ export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$ANDROID_NDK_HOME/toolchains/ll
 printf '%s' "$HYDRA_ANDROID_KEYSTORE" | base64 -d > "$RUNNER_TEMP/hydra.p12"
 alias_name=$(LC_ALL=C keytool -list -v -storetype PKCS12 -keystore "$RUNNER_TEMP/hydra.p12" -storepass:env HYDRA_ANDROID_PASSWORD | sed -n 's/^Alias name: //p' | head -1)
 test -n "$alias_name"
-keytool -importkeystore -noprompt -srckeystore "$RUNNER_TEMP/hydra.p12" -srcstoretype PKCS12 -srcstorepass:env HYDRA_ANDROID_PASSWORD -srcalias "$alias_name" -destkeystore mobile/app/release.keystore -deststoretype JKS -destalias hydra -deststorepass:env HYDRA_ANDROID_PASSWORD -destkeypass:env HYDRA_ANDROID_PASSWORD
+keytool -importkeystore -noprompt -srckeystore "$RUNNER_TEMP/hydra.p12" -srcstoretype PKCS12 -srcstorepass:env HYDRA_ANDROID_PASSWORD -srcalias "$alias_name" -destkeystore "$RUNNER_TEMP/hydra-release.jks" -deststoretype JKS -destalias hydra -deststorepass:env HYDRA_ANDROID_PASSWORD -destkeypass:env HYDRA_ANDROID_PASSWORD
+install -m600 "$RUNNER_TEMP/hydra-release.jks" mobile/app/release.keystore
 export LOCAL_PROPERTIES=$(printf 'KEYSTORE_PASS=%s\nALIAS_NAME=hydra\nALIAS_PASS=%s\n' "$HYDRA_ANDROID_PASSWORD" "$HYDRA_ANDROID_PASSWORD" | base64 -w0)
 rustup target add aarch64-linux-android x86_64-linux-android
 cargo build --manifest-path rust/Cargo.toml --locked --release --target x86_64-linux-android --lib
@@ -24,6 +25,7 @@ sed -i 's/^VERSION_CODE=.*/VERSION_CODE=2500/; s/^VERSION_NAME=.*/VERSION_NAME=2
 
 apk=$(find mobile/app/build/outputs/apk/other/release -name '*universal*.apk' -print -quit)
 aapt=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
+"$(dirname "$aapt")/apksigner" verify --verbose --print-certs "$apk"
 "$aapt" dump badging "$apk" > labels.txt
 grep -q "^application-label:'Hydra'$" labels.txt
 if grep '^application-label-' labels.txt | grep -v ":'Hydra'$"; then
