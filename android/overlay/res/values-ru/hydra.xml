@@ -21,4 +21,9 @@
     <string name="hydra_route_rules">Правила по порядку (JSON)</string>
     <string name="hydra_apply_next">Изменения вступят в силу при следующем подключении.</string>
     <string name="hydra_save">Сохранить</string>
+    <string name="hydra_add_tunnel">Добавить туннель</string>
+    <string name="hydra_rules_via">Загружать наборы правил через</string>
+    <string name="hydra_add_rule">Добавить правило</string>
+    <string name="hydra_match">Тип правила</string>
+    <string name="hydra_find_app">Найти приложение</string>
 </resources>

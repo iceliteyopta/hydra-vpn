@@ -21,4 +21,9 @@
     <string name="hydra_route_rules">Ordered rules (JSON)</string>
     <string name="hydra_apply_next">Changes apply at the next connection.</string>
     <string name="hydra_save">Save</string>
+    <string name="hydra_add_tunnel">Add tunnel</string>
+    <string name="hydra_rules_via">Download rule sets through</string>
+    <string name="hydra_add_rule">Add routing rule</string>
+    <string name="hydra_match">Match by</string>
+    <string name="hydra_find_app">Find an app</string>
 </resources>

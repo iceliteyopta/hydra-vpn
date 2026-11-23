@@ -96,7 +96,14 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
     val inboundArray = source.optJSONArray("inbounds") ?: JSONArray()
     val tun = (0 until inboundArray.length()).mapNotNull { inboundArray.optJSONObject(it) }
         .firstOrNull { it.optString("type") == "tun" }
-    val destinations = tags(source.optJSONArray("outbounds")) + tags(source.optJSONArray("endpoints"))
+    var outbounds by remember { mutableStateOf((source.optJSONArray("outbounds") ?: JSONArray()).toString()) }
+    val existingTags = tags(JSONArray(outbounds)) + tags(source.optJSONArray("endpoints"))
+    val destinations = (existingTags + "direct").distinct()
+    var newTunnel by remember { mutableStateOf(false) }
+    var link by remember { mutableStateOf("") }
+    val remoteSets = route?.optJSONArray("rule_set")
+    val hasRemoteSets = (0 until (remoteSets?.length() ?: 0)).any { remoteSets?.optJSONObject(it)?.optString("type") == "remote" }
+    var setVia by remember { mutableStateOf("") }
     var final by remember { mutableStateOf(route?.optString("final").orEmpty()) }
     var resolver by remember { mutableStateOf(dns?.optString("final").orEmpty()) }
     var level by remember { mutableStateOf(source.optJSONObject("log")?.optString("level","info") ?: "info") }
@@ -111,8 +118,29 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
         title = { Text(stringResource(R.string.hydra_profile_settings)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { newTunnel = !newTunnel }) { Text(stringResource(R.string.hydra_add_tunnel)) }
+                if (newTunnel) {
+                    OutlinedTextField(value = link, onValueChange = { link = it }, singleLine = true,
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), label = { Text("hy2://") })
+                    TextButton(enabled = link.isNotBlank(), onClick = {
+                        try {
+                            val config = io.nekohasekai.sfa.compose.screen.configuration.HydraImporter.parse(link.trim())
+                            val tunnel = JSONObject(config).getJSONArray("outbounds").getJSONObject(0)
+                            val base = android.net.Uri.parse(link.trim()).fragment?.takeIf { it.isNotBlank() } ?: "Hysteria2"
+                            var name = base
+                            var suffix = 2
+                            while (name in destinations || name == "block") name = "$base " + suffix++
+                            tunnel.put("tag", name)
+                            outbounds = JSONArray(outbounds).put(tunnel).toString()
+                            newTunnel = false
+                            link = ""
+                            error = null
+                        } catch (e: Exception) { error = e.localizedMessage }
+                    }) { Text(stringResource(R.string.hydra_add)) }
+                }
                 Choice(stringResource(R.string.hydra_default_route), final, listOf("") + destinations) { final = it }
                 Choice(stringResource(R.string.hydra_default_dns), resolver, listOf("") + tags(dns?.optJSONArray("servers"))) { resolver = it }
+                if (hasRemoteSets) Choice(stringResource(R.string.hydra_rules_via), setVia, listOf("") + destinations) { setVia = it }
                 Choice(stringResource(R.string.hydra_log_level), level, listOf("trace","debug","info","warn","error","fatal","panic")) { level = it }
                 if (tun != null) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -120,6 +148,7 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
                         Switch(checked = strict, onCheckedChange = { strict = it })
                     }
                 }
+                RuleComposer(destinations, rules) { rules = it }
                 TextButton(onClick = { advanced = !advanced }) { Text(stringResource(R.string.hydra_route_rules)) }
                 if (advanced) OutlinedTextField(value = rules, onValueChange = { rules = it },
                     label = { Text(stringResource(R.string.hydra_route_rules)) }, minLines = 3, maxLines = 8)
@@ -135,7 +164,21 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
                         val updated = JSONObject(profile.content)
                         val r = updated.section("route")
                         if (final.isBlank()) r.remove("final") else r.put("final", final)
-                        r.put("rules", JSONArray(rules))
+                        val entries = JSONArray(rules)
+                        r.put("rules", entries)
+                        val outs = JSONArray(outbounds)
+                        if ("direct" !in existingTags && (final == "direct" || setVia == "direct" ||
+                            (0 until entries.length()).any { entries.optJSONObject(it)?.optString("outbound") == "direct" })) {
+                            outs.put(JSONObject().put("type", "direct").put("tag", "direct"))
+                        }
+                        updated.put("outbounds", outs)
+                        if (setVia.isNotBlank()) {
+                            val sets = r.optJSONArray("rule_set")
+                            for (i in 0 until (sets?.length() ?: 0)) {
+                                val set = sets?.optJSONObject(i)
+                                if (set?.optString("type") == "remote") set.put("download_detour", setVia)
+                            }
+                        }
                         if (resolver.isNotBlank()) updated.section("dns").put("final",resolver)
                         else updated.optJSONObject("dns")?.remove("final")
                         updated.section("log").put("level",level)
@@ -158,4 +201,63 @@ private fun ProfileDialog(profile: EditableProfile, close: () -> Unit) {
         }) { Text(stringResource(R.string.hydra_save)) } },
         dismissButton = { TextButton(enabled = !busy, onClick = close) { Text(stringResource(android.R.string.cancel)) } },
     )
+}
+
+@Composable
+private fun RuleComposer(destinations: List<String>, rules: String, change: (String) -> Unit) {
+    var show by remember { mutableStateOf(false) }
+    var kind by remember { mutableStateOf("domain_suffix") }
+    var value by remember { mutableStateOf("") }
+    var dest by remember { mutableStateOf(destinations.firstOrNull().orEmpty()) }
+    val context = LocalContext.current
+    var apps by remember { mutableStateOf(emptyList<Pair<String,String>>()) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    TextButton(onClick = { show = !show }) { Text(stringResource(R.string.hydra_add_rule)) }
+    if (!show) return
+    Choice(stringResource(R.string.hydra_match), kind, listOf("domain_suffix","domain","domain_keyword","ip_cidr","port","package_name")) { kind = it; value = "" }
+    if (kind == "package_name") {
+        LaunchedEffect(Unit) {
+            apps = withContext(Dispatchers.IO) {
+                context.packageManager.getInstalledApplications(0).map { app ->
+                    app.loadLabel(context.packageManager).toString() to app.packageName
+                }.sortedBy { it.first.lowercase() }
+            }
+        }
+    }
+    OutlinedTextField(value = value, onValueChange = { value = it }, singleLine = true,
+        label = { Text(if (kind == "package_name") stringResource(R.string.hydra_find_app) else kind) })
+    if (kind == "package_name" && apps.none { it.second == value }) {
+        apps.asSequence().filter { it.first.contains(value,true) || it.second.contains(value,true) }.take(5).forEach { app ->
+            TextButton(onClick = { value = app.second }) { Text(app.first + " · " + app.second) }
+        }
+    }
+    Choice(stringResource(R.string.hydra_default_route), dest, destinations + "block") { dest = it }
+    TextButton(enabled = value.isNotBlank() && dest.isNotBlank(), onClick = {
+        try {
+            val values = JSONArray()
+            value.split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }.forEach {
+                if (kind == "port") {
+                    val port = it.toInt()
+                    require(port in 1..65535)
+                    values.put(port)
+                } else values.put(it)
+            }
+            require(values.length() > 0)
+            val added = JSONObject().put(kind, values)
+            if (dest == "block") added.put("action","reject") else added.put("outbound",dest)
+            val old = JSONArray(rules)
+            val result = JSONArray()
+            var inserted = false
+            for (i in 0 until old.length()) {
+                val item = old.getJSONObject(i)
+                if (!inserted && item.optString("action") !in listOf("sniff","hijack-dns","resolve","route-options")) {
+                    result.put(added); inserted = true
+                }
+                result.put(item)
+            }
+            if (!inserted) result.put(added)
+            change(result.toString(2)); show = false; value = ""; problem = null
+        } catch (e: Exception) { problem = e.localizedMessage ?: "Invalid rule" }
+    }) { Text(stringResource(R.string.hydra_add_rule)) }
+    problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }
