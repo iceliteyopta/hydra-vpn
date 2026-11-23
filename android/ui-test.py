@@ -90,3 +90,44 @@ for _ in range(5):
 label("debug")
 with open("hydra-android-settings.png", "wb") as output:
     subprocess.run(["adb", "exec-out", "screencap", "-p"], stdout=output, check=True)
+
+# Verify that a mandatory tunnel can be assigned without opening the JSON editor.
+def scroll_to(text):
+    for _ in range(12):
+        visible = nodes()
+        node = next((n for n in visible if n.get("text") == text and n.get("package") == PACKAGE), None)
+        if node is not None:
+            return node.attrib
+        area = next((n for n in visible if n.get("scrollable") == "true" and n.get("package") == PACKAGE), None)
+        if area is None:
+            break
+        x1, y1, x2, y2 = map(int, re.findall(r"\d+", area.get("bounds")))
+        x = (x1 + x2) // 2
+        adb("shell", "input", "swipe", str(x), str(y2 - 20), str(x), str(y1 + 20), "380")
+    return label(text)
+
+
+tap(scroll_to("Require tunnel for an app"))
+tap(scroll_to("package_name"))
+tap(label("domain_suffix"))
+field = wait_for(lambda n: n.get("class") == "android.widget.EditText")
+tap(field)
+adb("shell", "input text example.org")
+adb("shell", "input keyevent KEYCODE_BACK")
+# There are two controls with the same label while the rule editor is expanded.
+for _ in range(8):
+    visible = nodes()
+    adds = [n for n in visible if n.get("text") == "Add routing rule"]
+    field = next((n for n in visible if n.get("class") == "android.widget.EditText"), None)
+    field_y = int(re.findall(r"\d+", field.get("bounds"))[1]) if field is not None else -1
+    if adds and int(re.findall(r"\d+", adds[-1].get("bounds"))[1]) > field_y and any(n.get("text") == "VPN" for n in visible):
+        tap(adds[-1].attrib)
+        break
+    adb("shell", "input swipe 520 1750 520 900 400")
+tap(label("Save"))
+tap(label("Edit active profile"))
+tap(scroll_to("Ordered rules (JSON)"))
+wait_for(lambda n: "example.org" in n.get("text", "") and "domain_suffix" in n.get("text", ""))
+adb("shell", "input keyevent KEYCODE_BACK")
+tap(scroll_to("Check for update"))
+label("Hydra is up to date.")
