@@ -58,7 +58,9 @@ namespace Hydra
             if (line.IndexOf("ERROR", StringComparison.Ordinal) < 0) return;
             // Считаем только «туннель не довёз»: таймауты. Шум не считаем: служба обновлений Windows (порт 7680)
             // стучится в соседей по локальной сети, а «no route to host» — это просто адрес вне сетей сервера.
-            if (line.IndexOf("timed out", StringComparison.Ordinal) < 0 && line.IndexOf("i/o timeout", StringComparison.Ordinal) < 0) return;
+            if (line.IndexOf("timed out", StringComparison.Ordinal) < 0 &&
+                line.IndexOf("i/o timeout", StringComparison.Ordinal) < 0 &&
+                line.IndexOf("context deadline exceeded", StringComparison.Ordinal) < 0) return;
             if (line.IndexOf(":7680", StringComparison.Ordinal) >= 0) return;
             foreach (var tag in tunnelTags)
             {
