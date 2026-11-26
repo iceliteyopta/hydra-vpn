@@ -41,6 +41,8 @@ internal object HydraRelays {
 
     fun canBindWifi(config: JSONObject, tunnel: JSONObject): Boolean =
         config.optJSONObject("route")?.optBoolean("auto_detect_interface") == true &&
+            config.optJSONObject("route")?.optString("default_interface").isNullOrBlank() &&
+            !tunnel.optBoolean("tcp_fast_open") &&
             listOf("bind_interface", "inet4_bind_address", "inet6_bind_address").none(tunnel::has)
 
     fun prepare(context: Context, id: Long, original: String): Runtime {
