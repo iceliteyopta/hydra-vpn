@@ -35,7 +35,7 @@ private fun tags(array: JSONArray?): List<String> =
     }
 
 @Composable
-private fun Choice(label: String, value: String, options: List<String>, select: (String) -> Unit) {
+internal fun Choice(label: String, value: String, options: List<String>, select: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Column {
         Text(label, style = MaterialTheme.typography.labelMedium)
@@ -83,6 +83,7 @@ fun HydraProfileSettings() {
                 catch (e: Exception) { problem = e.localizedMessage }
             }) { Text(stringResource(R.string.hydra_lockdown)) }
             HydraMobileOptions()
+            HydraRelaySettings()
             problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }

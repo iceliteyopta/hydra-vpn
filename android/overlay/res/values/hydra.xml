@@ -1,4 +1,12 @@
 <resources>
+    <string name="hydra_relay_title">Hysteria2 relay</string>
+    <string name="hydra_relay_tunnel">Tunnel in this profile</string>
+    <string name="hydra_relay_hint">Enter your UDP relay to enable automatic path checks with auto-reconnect. Clear the address to remove it.</string>
+    <string name="hydra_relay_host">Relay hostname or IP</string>
+    <string name="hydra_relay_port">Port (blank uses tunnel ports)</string>
+    <string name="hydra_relay_wifi">Use relay over Wi-Fi only</string>
+    <string name="hydra_relay_missing">Select a profile with a named Hysteria2 tunnel that connects to a server directly.</string>
+    <string name="hydra_relay_invalid">Enter a hostname or IP and an optional port from 1 to 65535.</string>
     <string name="hydra_off">Disconnected</string>
     <string name="hydra_on">Connected</string>
     <string name="hydra_starting">Connecting…</string>

@@ -1,4 +1,12 @@
 <resources>
+    <string name="hydra_relay_title">Ретранслятор Hysteria2</string>
+    <string name="hydra_relay_tunnel">Туннель этого профиля</string>
+    <string name="hydra_relay_hint">Укажи свой UDP-ретранслятор. При включённом автопереподключении Hydra проверит оба пути. Очисти адрес, чтобы убрать ретранслятор.</string>
+    <string name="hydra_relay_host">Домен или IP ретранслятора</string>
+    <string name="hydra_relay_port">Порт (пусто — порты туннеля)</string>
+    <string name="hydra_relay_wifi">Использовать ретранслятор только по Wi-Fi</string>
+    <string name="hydra_relay_missing">Выбери профиль с именованным туннелем Hysteria2, подключающимся к серверу напрямую.</string>
+    <string name="hydra_relay_invalid">Введи домен или IP. Порт можно оставить пустым или указать число от 1 до 65535.</string>
     <string name="hydra_off">Отключено</string>
     <string name="hydra_on">Подключено</string>
     <string name="hydra_starting">Подключение…</string>

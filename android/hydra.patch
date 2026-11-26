@@ -27,15 +27,17 @@ index 85b7869..a8ba5e9 100644
      }
  
 diff --git a/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt b/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt
-index 11174c0..f191b60 100644
+index 11174c0..a421ecd 100644
 --- a/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt
 +++ b/app/src/main/java/io/nekohasekai/sfa/bg/BoxService.kt
-@@ -79,6 +79,49 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+@@ -79,6 +79,70 @@ class BoxService(private val service: Service, private val platformInterface: Pl
      private val notification = ServiceNotification(status, service)
      private lateinit var commandServer: CommandServer
      private val idleModeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 +    private val timeoutHistory = mutableMapOf<String, java.util.ArrayDeque<Long>>()
 +    private var nextRecovery = 0L
++    private val lastRelayCheck = mutableMapOf<String, Long>()
++    @Volatile private var relayOwners: Map<String, String> = emptyMap()
 +    private var tunnelTags = emptySet<String>()
 +    private val recoveryClient = io.nekohasekai.sfa.utils.CommandClient(idleModeScope,
 +        io.nekohasekai.sfa.utils.CommandClient.ConnectionType.Log,
@@ -43,20 +45,34 @@ index 11174c0..f191b60 100644
 +            override fun appendLogs(message: List<io.nekohasekai.libbox.LogEntry>) {
 +                val now = android.os.SystemClock.elapsedRealtime()
 +                synchronized(timeoutHistory) {
-+                    if (now < nextRecovery || status.value != Status.Started ||
++                    if (status.value != Status.Started ||
 +                        !service.getSharedPreferences("hydra", 0).getBoolean("recover", true)) return
 +                    for (entry in message) {
 +                        val line = entry.message
-+                        if (!line.contains("i/o timeout") && !line.contains("timed out")) continue
-+                        val tag = tunnelTags.firstOrNull { line.contains("[$it]") } ?: continue
++                        if (!line.contains("i/o timeout") && !line.contains("timed out") &&
++                            !line.contains("context deadline exceeded") && !line.contains("timeout: no recent network activity")) continue
++                        val owners = relayOwners
++                        val group = owners.entries.firstOrNull { line.contains("[${it.key}]") }?.value
++                        val tag = group ?: tunnelTags.firstOrNull { line.contains("[$it]") } ?: continue
++                        if (group == null && now < nextRecovery || group != null && now < (lastRelayCheck[group] ?: 0L)) continue
 +                        val times = timeoutHistory.getOrPut(tag) { java.util.ArrayDeque<Long>() }
 +                        while (!times.isEmpty() && now - times.first > 60_000) times.removeFirst()
 +                        times.addLast(now)
 +                        if (times.size >= 5) {
-+                            timeoutHistory.clear()
++                            times.clear()
++                            if (group != null) {
++                                lastRelayCheck[group] = now + 30_000
++                                idleModeScope.launch {
++                                    if (relayOwners !== owners || status.value != Status.Started) return@launch
++                                    val client = Libbox.newStandaloneCommandClient()
++                                    try { client.urlTest(group) } catch (e: Exception) { Log.w(TAG, "Path check failed", e) }
++                                    finally { runCatching { client.disconnect() } }
++                                }
++                                continue
++                            }
 +                            nextRecovery = now + 180_000
 +                            idleModeScope.launch {
-+                                if (status.value == Status.Started) serviceReload0()
++                                if (relayOwners === owners && status.value == Status.Started) serviceReload0()
 +                            }
 +                            break
 +                        }
@@ -64,8 +80,8 @@ index 11174c0..f191b60 100644
 +                }
 +            }
 +        }, localOnly = true)
-+    private fun watchTunnels(content: String) {
-+        val config = org.json.JSONObject(content)
++    private fun watchTunnels(runtime: HydraRelays.Runtime) {
++        val config = org.json.JSONObject(runtime.content)
 +        val tags = mutableSetOf<String>()
 +        for (key in listOf("outbounds", "endpoints")) {
 +            val array = config.optJSONArray(key) ?: continue
@@ -75,21 +91,57 @@ index 11174c0..f191b60 100644
 +                item.optString("tag").takeIf { it.isNotBlank() }?.let { tags.add(it) }
 +            }
 +        }
-+        synchronized(timeoutHistory) { tunnelTags = tags; timeoutHistory.clear() }
++        synchronized(timeoutHistory) {
++            relayOwners = runtime.owners
++            tunnelTags = tags
++            timeoutHistory.clear()
++            lastRelayCheck.clear()
++        }
 +    }
      private val idleModeUpdates = Channel<Boolean>(Channel.UNLIMITED)
  
      init {
-@@ -188,6 +231,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+@@ -148,9 +212,10 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+ 
+             DefaultNetworkMonitor.start()
+ 
++            val runtime = HydraRelays.prepare(service, profile.id, content)
+             try {
+                 commandServer.startOrReloadService(
+-                    content,
++                    runtime.content,
+                     OverrideOptions().apply {
+                         autoRedirect = Settings.autoRedirect
+                         if (Vendor.isPerAppProxyAvailable() && Settings.perAppProxyEnabled) {
+@@ -188,6 +253,8 @@ class BoxService(private val service: Service, private val platformInterface: Pl
                  notification.show(lastProfileName, R.string.status_started)
              }
              notification.start()
-+            watchTunnels(content)
++            watchTunnels(runtime)
 +            recoveryClient.connect()
          } catch (e: Exception) {
              stopAndAlert(Alert.StartService, e.message)
              return
-@@ -288,6 +333,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+@@ -231,8 +298,9 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+         }
+         lastProfileName = profile.name
+         try {
++            val runtime = HydraRelays.prepare(service, profile.id, content)
+             commandServer.startOrReloadService(
+-                content,
++                runtime.content,
+                 OverrideOptions().apply {
+                     autoRedirect = Settings.autoRedirect
+                     if (Vendor.isPerAppProxyAvailable() && Settings.perAppProxyEnabled) {
+@@ -245,6 +313,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+                     }
+                 },
+             )
++            watchTunnels(runtime)
+         } catch (e: Exception) {
+             stopAndAlert(Alert.CreateService, e.message)
+             return
+@@ -288,6 +357,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
      private fun stopService() {
          if (status.value != Status.Started) return
          status.value = Status.Stopping
@@ -97,7 +149,7 @@ index 11174c0..f191b60 100644
          if (receiverRegistered) {
              service.unregisterReceiver(receiver)
              receiverRegistered = false
-@@ -390,6 +436,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+@@ -390,6 +460,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
      internal fun onBind(): IBinder = binder
  
      internal fun onDestroy() {
@@ -105,7 +157,7 @@ index 11174c0..f191b60 100644
          idleModeUpdates.cancel()
          idleModeScope.cancel()
          binder.close()
-@@ -404,7 +451,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
+@@ -404,7 +475,7 @@ class BoxService(private val service: Service, private val platformInterface: Pl
          val builder =
              NotificationCompat.Builder(service, channel).setShowWhen(false)
                  .setContentTitle(notification.title).setContentText(notification.body)
