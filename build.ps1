@@ -15,7 +15,7 @@ $iconArg = if (Test-Path $icon) { "/win32icon:$icon" } else { "/nologo" }
 & $csc /nologo /target:winexe /optimize+ /codepage:65001 /nowarn:1607 $iconArg `
     "/out:$out" "/win32manifest:$(Join-Path $root 'src\app.manifest')" `
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
-    /r:System.Web.Extensions.dll /r:System.Security.dll `
+    /r:System.Web.Extensions.dll /r:System.Security.dll /r:System.Management.dll /r:System.Numerics.dll `
     /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll $src
 
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }

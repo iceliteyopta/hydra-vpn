@@ -10,14 +10,12 @@ namespace Hydra
 {
     // Kill switch на брандмауэре Windows.
     // Для выбранных программ и IP-адресов блокируется исходящий трафик с любого локального адреса,
-    // кроме адреса TUN-адаптера Hydra (172.19.0.1 / fdfe:dcba:9876::1) и loopback.
+    // кроме выбранных адресов TUN-адаптера Hydra и loopback.
     // Пока VPN работает, их трафик идёт через TUN и проходит. Если VPN упал, трафик пошёл бы
     // через Wi-Fi/Ethernet с другим локальным адресом — и брандмауэр его режет.
     public static class KillSwitch
     {
         public const string RuleName = "Hydra KillSwitch";
-        public const string LocalV4 = "0.0.0.0-126.255.255.255,128.0.0.0-172.18.255.255,172.19.0.4-255.255.255.255";
-        public const string LocalV6 = "::2-fdfe:dcba:9875:ffff:ffff:ffff:ffff:ffff,fdfe:dcba:9876::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff";
 
         public static readonly string[] DefaultApps = {
             @"C:\Program Files\WindowsApps\Claude_*\app\Claude.exe",
@@ -128,8 +126,10 @@ namespace Hydra
             return IPAddress.IsLoopback(a) || a.IsIPv6LinkLocal;
         }
 
-        public static int Enable(List<string> exePaths, List<string> ips, Action<string> log)
+        internal static int Enable(List<string> exePaths, List<string> ips, TunAddresses addresses, Action<string> log)
         {
+            string LocalV4 = addresses.BlockedIPv4;
+            string LocalV6 = addresses.BlockedIPv6;
             Disable(null);
             int n = 0;
             foreach (var exe in exePaths)

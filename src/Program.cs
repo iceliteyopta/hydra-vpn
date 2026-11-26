@@ -183,11 +183,12 @@ namespace Hydra
             I18n.Init(ProfileStore.Load().Profile.Language);
 
             // TUN-адаптеры и маршруты требуют прав администратора
+            bool connectOnStart = Array.IndexOf(args, "--connect") >= 0;
             if (!IsAdmin())
             {
                 try
                 {
-                    Process.Start(new ProcessStartInfo(Application.ExecutablePath) { Verb = "runas", UseShellExecute = true });
+                    Process.Start(new ProcessStartInfo(Application.ExecutablePath, connectOnStart ? "--connect" : "") { Verb = "runas", UseShellExecute = true });
                 }
                 catch
                 {
@@ -227,7 +228,7 @@ namespace Hydra
                 History.MarkStarted();
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new MainForm());
+                Application.Run(new MainForm(connectOnStart));
                 History.MarkExited();
                 FileLog.Close();
             }
@@ -266,6 +267,21 @@ namespace Hydra
             };
 
             var p = new Profile();
+            // Both selector members must still authenticate the original VPN endpoint.
+            var hy = LinkParser.Parse("hy2://example@198.51.100.9:443?obfs=salamander&obfs-password=test");
+            var paths = new TunnelPaths("Test VPN", new HashSet<string> { "Test VPN · relay" });
+            var members = new List<object>();
+            paths.AddOutbounds(hy.Outbound, "192.0.2.10", members);
+            var selector = (Dictionary<string, object>)members[0];
+            var relay = (Dictionary<string, object>)members[1];
+            var direct = (Dictionary<string, object>)members[2];
+            var relayTls = (Dictionary<string, object>)relay["tls"];
+            bool pathConfig = (string)selector["tag"] == paths.Group && (string)selector["default"] == paths.Relay &&
+                paths.Relay != "Test VPN · relay" && (string)direct["server"] == "198.51.100.9" &&
+                (string)relay["server"] == "192.0.2.10" && (string)relayTls["server_name"] == (string)direct["server"] &&
+                relay["password"].Equals(direct["password"]) && relay["obfs"].Equals(direct["obfs"]);
+            log.AppendLine((pathConfig ? "OK   " : "FAIL ") + "relay identity, authentication and selector tags");
+            if (!pathConfig) fails++;
             foreach (var l in links)
             {
                 try

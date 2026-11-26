@@ -18,7 +18,7 @@ namespace Hydra
         readonly object sync = new object();
         Process singbox;
         readonly List<IRunner> runners = new List<IRunner>();
-        public string State = "stopped";
+        public volatile string State = "stopped";
         public event Action<bool> KillChanged;
         public bool KillActive;
 
@@ -31,10 +31,50 @@ namespace Hydra
         readonly Dictionary<string, List<DateTime>> tunnelErrors = new Dictionary<string, List<DateTime>>();
         readonly Dictionary<string, DateTime> tunnelAlerted = new Dictionary<string, DateTime>();
         HashSet<string> tunnelTags = new HashSet<string>();
+        volatile Dictionary<string, PathRecovery> pathChecks = new Dictionary<string, PathRecovery>();
+        volatile Dictionary<string, string> pathOwners = new Dictionary<string, string>();
 
         readonly Dictionary<string, DateTime> reestablished = new Dictionary<string, DateTime>();
 
         void WatchLine(string line) { WatchAt(line, DateTime.Now); }
+
+        internal void PrepareWatch(Profile p, BuildResult res)
+        {
+            var checks = new Dictionary<string, PathRecovery>();
+            var owners = new Dictionary<string, string>();
+            foreach (var pair in res.PathPairs)
+            {
+                owners.Add(pair.Direct, pair.Group);
+                owners.Add(pair.Relay, pair.Group);
+                checks.Add(pair.Group, new PathRecovery(pair, ConfigBuilder.StatsPort, ConfigBuilder.StatsSecret,
+                    () => pathChecks == checks && p.AutoReconnect && (State == "connected" || State == "connecting"), L));
+            }
+            var tags = new HashSet<string>();
+            foreach (var t in p.Tunnels)
+            {
+                if (!t.Enabled) continue;
+                tags.Add(t.Name);
+                // Off the configured Wi-Fi there is no eligible relay. A timeout on this
+                // profile must still never restart the user's other tunnels.
+                if (t.HasWifiRelay() && !checks.ContainsKey(t.Name)) checks.Add(t.Name, null);
+            }
+            lock (tunnelErrors)
+            {
+                EndPathMonitoring();
+                tunnelErrors.Clear(); tunnelAlerted.Clear(); reestablished.Clear();
+                tunnelTags = tags;
+                pathOwners = owners;
+                pathChecks = checks;
+                foreach (var check in checks.Values) if (check != null) check.StartMonitoring();
+            }
+        }
+
+        void EndPathMonitoring()
+        {
+            var previous = pathChecks;
+            pathChecks = new Dictionary<string, PathRecovery>();
+            foreach (var check in previous.Values) if (check != null) check.Dispose();
+        }
 
         // Для проверки на старых журналах: те же правила, но со временем из журнала
         public string ReplayLine(string line, DateTime at, HashSet<string> tags)
@@ -60,8 +100,16 @@ namespace Hydra
             // стучится в соседей по локальной сети, а «no route to host» — это просто адрес вне сетей сервера.
             if (line.IndexOf("timed out", StringComparison.Ordinal) < 0 &&
                 line.IndexOf("i/o timeout", StringComparison.Ordinal) < 0 &&
+                line.IndexOf("timeout: no recent network activity", StringComparison.Ordinal) < 0 &&
                 line.IndexOf("context deadline exceeded", StringComparison.Ordinal) < 0) return;
             if (line.IndexOf(":7680", StringComparison.Ordinal) >= 0) return;
+            // The core can report either the selected Hysteria2 member or the selector.
+            foreach (var member in pathOwners)
+                if (line.Contains("[" + member.Key + "]"))
+                {
+                    line = line.Replace("[" + member.Key + "]", "[" + member.Value + "]");
+                    break;
+                }
             foreach (var tag in tunnelTags)
             {
                 if (line.IndexOf("[" + tag + "]", StringComparison.Ordinal) < 0) continue;
@@ -73,12 +121,17 @@ namespace Hydra
                     list.RemoveAll(t => (now - t).TotalSeconds > 60);
                     DateTime last, re;
                     int threshold = reestablished.TryGetValue(tag, out re) && (now - re).TotalSeconds < 120 ? 3 : 5;
-                    if (list.Count >= threshold && (!tunnelAlerted.TryGetValue(tag, out last) || (now - last).TotalMinutes > 3))
+                    PathRecovery recovery;
+                    bool scoped = pathChecks.TryGetValue(tag, out recovery);
+                    int cooldown = recovery == null ? 180 : 30;
+                    if (list.Count >= threshold && (!tunnelAlerted.TryGetValue(tag, out last) || (now - last).TotalSeconds >= cooldown))
                     {
                         tunnelAlerted[tag] = now;
+                        list.Clear();
                         string msg = line.Length > 200 ? line.Substring(line.Length - 200) : line;
                         History.Add(History.TunnelError, I18n.L("Туннель «") + tag + I18n.L("» не отвечает"), msg.Trim());
-                        var h = TunnelProblem; if (h != null) h(tag, msg);
+                        if (recovery != null) recovery.Check();
+                        else if (!scoped) { var h = TunnelProblem; if (h != null) h(tag, msg); }
                     }
                 }
             }
@@ -118,6 +171,8 @@ namespace Hydra
                             long up = Convert.ToInt64(c["upload"]), down = Convert.ToInt64(c["download"]);
                             var chains = c.ContainsKey("chains") ? c["chains"] as object[] : null;
                             string tag = chains != null && chains.Length > 0 ? Convert.ToString(chains[0]) : "direct";
+                            string owner;
+                            if (pathOwners.TryGetValue(tag, out owner)) tag = owner;
                             long[] p;
                             long du = 0, dd = 0;
                             if (prev.TryGetValue(id, out p)) { du = Math.Max(0, up - p[0]); dd = Math.Max(0, down - p[1]); }
@@ -216,12 +271,9 @@ namespace Hydra
             L(I18n.L("Собираю конфигурацию…"));
             ConfigBuilder.StatsPort = Proc.FreePort();
             ConfigBuilder.StatsSecret = Guid.NewGuid().ToString("N");
-            var tags = new HashSet<string>();
-            foreach (var t in p.Tunnels) if (t.Enabled) tags.Add(t.Name);
-            tunnelTags = tags;
-            lock (tunnelErrors) { tunnelErrors.Clear(); tunnelAlerted.Clear(); reestablished.Clear(); }
             BuildResult res;
             string cfg = WriteConfig(p, true, out res);
+            PrepareWatch(p, res);
             foreach (var w in res.Warnings) L("! " + w);
 
             string outp;
@@ -241,12 +293,13 @@ namespace Hydra
 
             L(I18n.L("Запускаю sing-box (TUN «") + ConfigBuilder.TunName + I18n.L("»)…"));
             var started = new ManualResetEvent(false);
+            var sessionChecks = pathChecks;
             lock (singboxTail) singboxTail.Clear();
             singbox = Proc.Start(sb, "run -c \"" + cfg + "\" -D \"" + AppPaths.RunDir.TrimEnd('\\') + "\" --disable-color", AppPaths.RunDir, line =>
             {
                 L("[sing-box] " + line);
                 lock (singboxTail) { singboxTail.Enqueue(line); while (singboxTail.Count > 80) singboxTail.Dequeue(); }
-                WatchLine(line);
+                if (pathChecks == sessionChecks) WatchLine(line);
                 if (line.Contains("sing-box started")) started.Set();
             }, null);
             var proc = singbox;
@@ -277,7 +330,7 @@ namespace Hydra
 
             if (killApps != null)
             {
-                int n = KillSwitch.Enable(killApps, killIps, L);
+                int n = KillSwitch.Enable(killApps, killIps, res.Addresses, L);
                 L(I18n.L("Kill switch включён: ") + n + I18n.L(" правил брандмауэра. Без VPN эти программы и адреса не выйдут в интернет."));
                 SetKill(n > 0);
             }
@@ -352,6 +405,7 @@ namespace Hydra
             {
                 if (State == "stopping" || State == "stopped") return;
                 SetState("stopping");
+                lock (tunnelErrors) EndPathMonitoring();
             }
             List<IRunner> rs;
             lock (sync) { rs = new List<IRunner>(runners); runners.Clear(); }

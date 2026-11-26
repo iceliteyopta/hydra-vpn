@@ -27,7 +27,8 @@ namespace Hydra
     {
         public const string AppStart = "app_start", AppExit = "app_exit", Connected = "connected", Disconnected = "disconnected",
             Dropped = "dropped", Error = "error", TunnelError = "tunnel_error", Crash = "crash",
-            KillHold = "kill_hold", KillRelease = "kill_release", Update = "update", Reconnect = "reconnect";
+            KillHold = "kill_hold", KillRelease = "kill_release", Update = "update", Reconnect = "reconnect",
+            PathSwitch = "path_switch";
 
         static readonly object sync = new object();
         public static event Action<HistoryEvent> Added;

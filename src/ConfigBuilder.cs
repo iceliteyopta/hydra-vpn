@@ -19,6 +19,8 @@ namespace Hydra
 
     public class BuildResult
     {
+        internal TunAddresses Addresses;
+        internal readonly List<TunnelPaths> PathPairs = new List<TunnelPaths>();
         public Dictionary<string, object> Config;
         public List<ExternalTunnel> Externals = new List<ExternalTunnel>();
         public List<string> Warnings = new List<string>();
@@ -76,6 +78,9 @@ namespace Hydra
             var tunnelDns = new Dictionary<string, string>();
             var processBypass = new List<object>();
             var nativeOvpn = new List<string>();
+            var wifiNetworks = new Lazy<HashSet<string>>(delegate { return WifiNetworks.Connected(res.Warnings); });
+            var reserved = new HashSet<string> { "direct", "block" };
+            foreach (var t in p.Tunnels) reserved.Add(t.Name);
 
             outbounds.Add(D.New("type", "direct", "tag", "direct"));
             dnsServers.Add(D.New("type", "local", "tag", "dns-local"));
@@ -88,8 +93,18 @@ namespace Hydra
                     if (TunnelTypes.IsLink(t.Type))
                     {
                         var pl = LinkParser.Parse(t.Link);
-                        pl.Outbound["tag"] = t.Name;
-                        outbounds.Add(pl.Outbound);
+                        if (pl.Type == "hysteria2" && t.HasWifiRelay() && wifiNetworks.Value.Contains(t.WifiNetworkName) &&
+                            !string.Equals((string)pl.Outbound["server"], t.WifiServer.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            var pair = new TunnelPaths(t.Name, reserved);
+                            pair.AddOutbounds(pl.Outbound, t.WifiServer.Trim(), outbounds);
+                            res.PathPairs.Add(pair);
+                        }
+                        else
+                        {
+                            pl.Outbound["tag"] = t.Name;
+                            outbounds.Add(pl.Outbound);
+                        }
                     }
                     else if (t.Type == TunnelTypes.WireGuard)
                     {
@@ -258,9 +273,13 @@ namespace Hydra
             }
 
             // ---- сборка ----
+            res.Addresses = TunAddresses.Detect();
             var tun = D.New("type", "tun", "tag", "tun-in", "interface_name", TunName,
-                "address", new List<object> { "172.19.0.1/30", "fdfe:dcba:9876::1/126" },
+                "address", new List<object> { res.Addresses.IPv4 + "/30", res.Addresses.IPv6 + "/126" },
                 "mtu", 9000, "auto_route", true, "strict_route", p.StrictRoute, "stack", "mixed");
+            // Prefer Hydra over a competing IPv4 default TUN, independent of its metric.
+            if (res.Addresses.ForeignTunDefault)
+                tun["route_address"] = new List<object> { "0.0.0.0/1", "128.0.0.0/1", "::/0" };
             if (excludes.Count > 0) tun["route_exclude_address"] = Dedup(excludes);
 
             var route = D.New("rules", routeRules, "final", final, "auto_detect_interface", true,

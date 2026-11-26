@@ -83,7 +83,7 @@ namespace Hydra
             new[] { I18n.L("Реклама (geosite category-ads-all)"), "geosite", "category-ads-all" },
         };
 
-        public MainForm()
+        public MainForm(bool connectOnStart = false)
         {
             store = ProfileStore.Load();
             Text = AppName;
@@ -133,6 +133,7 @@ namespace Hydra
             Shown += (s, e) => { if (AppPaths.SingBox(P) == null) StartCoreDownload(); };
             // Проверка обновлений на GitHub
             Shown += (s, e) => { if (P.CheckUpdates) CheckForUpdates(false); };
+            if (connectOnStart) Shown += (s, e) => BeginInvoke((Action)Connect);
         }
 
         // ======================= обновления =======================
@@ -419,6 +420,7 @@ namespace Hydra
             else if (k == History.Crash) Notify(ev.Text, ev.Details ?? "", ToolTipIcon.Error, "history");
             else if (k == History.KillHold) Notify(I18n.L("Kill switch сработал"), I18n.L("Защищённые программы отрезаны от интернета, пока VPN не поднимется."), ToolTipIcon.Warning, "home");
             else if (k == History.Reconnect) Notify(I18n.L("Переподключаю VPN"), ev.Details ?? "", ToolTipIcon.Info, "history");
+            else if (k == History.PathSwitch) Notify(AppName, ev.Text, ToolTipIcon.Info, "history");
             else if (k == History.Connected && !Visible) Notify(I18n.L("VPN подключён"), ev.Details ?? "", ToolTipIcon.Info, "home");
         }
 
@@ -741,6 +743,8 @@ namespace Hydra
                 m.Items.Add(I18n.L("Драйвер OpenVPN…"), null, (s, e) => SetOvpnDriver(t));
             }
             m.Items.Add(I18n.L("DNS внутри туннеля…"), null, (s, e) => SetTunnelDns(t));
+            if (t.Type == "hysteria2")
+                m.Items.Add(I18n.L("Ретранслятор Wi-Fi…"), null, (s, e) => SetWifiRelay(t));
             m.Items.Add(new ToolStripSeparator());
             var del = m.Items.Add(I18n.L("Удалить"), null, (s, e) => DeleteTunnel(t));
             del.ForeColor = Theme.Bad;
@@ -1095,7 +1099,7 @@ namespace Hydra
             var tgHeal = new ToggleSwitch();
             tgHeal.SetSilently(P.AutoReconnect);
             tgHeal.CheckedChanged += (s, e) => { P.AutoReconnect = tgHeal.Checked; Save(); };
-            AddRow(tl, I18n.L("Автопереподключение"), tgHeal, I18n.L("Если туннель перестал отвечать, Hydra сама переподключит VPN (kill switch при этом не снимается). Не чаще раза в 3 минуты."));
+            AddRow(tl, I18n.L("Автопереподключение"), tgHeal, I18n.L("При тайм-аутах Hysteria2 проверяет оба пути на выбранном Wi-Fi. Для остальных туннелей Hydra переподключает VPN."));
 
             var folder = new FlatButton(I18n.L("Открыть папку Hydra"), Theme.IcFolder, ButtonKind.Secondary);
             folder.Click += (s, e) => Process.Start("explorer.exe", "\"" + AppPaths.BaseDir + "\"");
@@ -1268,7 +1272,7 @@ namespace Hydra
             foreach (var e in historyAll)
             {
                 bool show = f == 0
-                    || f == 1 && (e.Kind == History.Connected || e.Kind == History.Disconnected || e.Kind == History.Dropped)
+                    || f == 1 && (e.Kind == History.Connected || e.Kind == History.Disconnected || e.Kind == History.Dropped || e.Kind == History.PathSwitch)
                     || f == 2 && (e.Kind == History.Dropped || e.Kind == History.Error || e.Kind == History.TunnelError || e.Kind == History.KillHold)
                     || f == 3 && e.Kind == History.Crash;
                 if (show) lbHistory.Items.Add(e);
@@ -1283,7 +1287,7 @@ namespace Hydra
             if (k == History.Disconnected || k == History.KillRelease) return Theme.Accent;
             if (k == History.Dropped || k == History.KillHold) return Theme.Warn;
             if (k == History.Error || k == History.TunnelError || k == History.Crash) return Theme.Bad;
-            if (k == History.Update || k == History.Reconnect) return Theme.Accent2;
+            if (k == History.Update || k == History.Reconnect || k == History.PathSwitch) return Theme.Accent2;
             return Theme.Muted;
         }
 
@@ -1567,6 +1571,26 @@ namespace Hydra
             string v = Dialogs.Input(this, I18n.L("DNS внутри туннеля"), I18n.L("DNS для доменов, которые идут через «") + t.Name + I18n.L("» (пусто — автоматически):"), t.DnsServer);
             if (v == null) return;
             t.DnsServer = v; Save();
+        }
+
+        void SetWifiRelay(Tunnel t)
+        {
+            string title = I18n.L("Ретранслятор Wi-Fi…");
+            string network = Dialogs.Input(this, title, I18n.L("Имя сети Wi-Fi в Windows. Оставьте пустым, чтобы отключить ретранслятор."), t.WifiNetworkName);
+            if (network == null) return;
+            string host = "";
+            if (network.Length > 0)
+            {
+                host = Dialogs.Input(this, title, I18n.L("Адрес UDP-ретранслятора. Порт берётся из ссылки Hysteria2."), t.WifiServer);
+                if (host == null) return;
+                if (Uri.CheckHostName(host) == UriHostNameType.Unknown)
+                {
+                    MessageBox.Show(this, I18n.L("Введите доменное имя или IP-адрес."), AppName); return;
+                }
+            }
+            t.WifiNetworkName = network;
+            t.WifiServer = host;
+            Save();
         }
 
         // ======================= подключение =======================

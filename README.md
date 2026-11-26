@@ -8,6 +8,7 @@
 
 ## Features
 
+- **Hysteria2 Wi-Fi relay.** Open the Hysteria2 tunnel menu and choose **Wi-Fi relay…** to enter a Windows network name and relay host. The relay forwards UDP to the VPN server on the port from the link. With auto-reconnect enabled, five timeouts within one minute trigger HTTPS checks through both paths. Hydra also checks the active path every 45 seconds to catch stalled connections. If only the alternate responds, Hydra switches that tunnel. If both fail, it checks again after 30 seconds. Path changes appear in History.
 - **Multiple tunnels at the same time.** All enabled tunnels come up together; there is no "pick one server".
 - **Rule-based routing.** Route by domain (with subdomains), exact domain, keyword, geosite category, IP/subnet, geoip country, app (`.exe`) or port. First match wins; everything else goes to a tunnel or direct.
 - **Kill switch per app and per site.** Selected apps (Claude Desktop and Claude Code by default) and sites never leave the tunnel. If the VPN drops, Windows Firewall blocks them from going out directly.

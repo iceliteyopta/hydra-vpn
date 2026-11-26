@@ -25,6 +25,14 @@ namespace Hydra
         public string Type { get; set; }
         public bool Enabled { get; set; }
         public string Server { get; set; }
+        // Optional Hysteria2 endpoint for a specific connected Windows Wi-Fi network.
+        public string WifiNetworkName { get; set; }
+        public string WifiServer { get; set; }
+        internal bool HasWifiRelay()
+        {
+            return Type == "hysteria2" && !string.IsNullOrWhiteSpace(WifiNetworkName) &&
+                !string.IsNullOrWhiteSpace(WifiServer);
+        }
         // Для протоколов по ссылке (vless://, hy2:// ...)
         public string Link { get; set; }
         // Для OpenVPN / WireGuard / AmneziaWG: файл внутри data\tunnels\<Id>\

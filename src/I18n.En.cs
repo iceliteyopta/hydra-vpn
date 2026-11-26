@@ -6,6 +6,19 @@ namespace Hydra
         static I18n()
         {
             // --- главное окно ---
+            T("Текущий путь отвечает", "Current path is responding");
+            T("Ошибка проверки пути", "Path check failed");
+            T("Путь переключён", "Switched path");
+            T("Оба пути не ответили. Повтор через 30 с.", "Neither path responded. Retrying in 30 s.");
+            T("без ретранслятора", "without relay");
+            T("через ретранслятор", "via relay");
+            T("Не удалось подтвердить переключение", "Could not confirm path selection");
+            T("Неизвестный активный путь", "Unrecognized active path");
+            T("При тайм-аутах Hysteria2 проверяет оба пути на выбранном Wi-Fi. Для остальных туннелей Hydra переподключает VPN.", "On the selected Wi-Fi, Hysteria2 checks both paths after timeouts. For other tunnels, Hydra reconnects the VPN.");
+            T("Ретранслятор Wi-Fi…", "Wi-Fi relay…");
+            T("Имя сети Wi-Fi в Windows. Оставьте пустым, чтобы отключить ретранслятор.", "Windows Wi-Fi network name. Leave blank to disable the relay.");
+            T("Адрес UDP-ретранслятора. Порт берётся из ссылки Hysteria2.", "UDP relay address. Hydra uses the port from the Hysteria2 link.");
+            T("Введите доменное имя или IP-адрес.", "Enter a hostname or IP address.");
             T("Напрямую", "Direct");
             T("Блокировать", "Block");
             T("Telegram (домены)", "Telegram (domains)");
